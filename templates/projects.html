@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Projects | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Projects</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="projects-intro-heading">
+    <div>
+        <h2 id="projects-intro-heading">Manage your projects</h2>
+        <p>View project status, progress, and upcoming due dates.</p>
+    </div>
+    <a class="button" href="#create-project">Create Project</a>
+</section>
+
+<section class="projects-list-section" aria-labelledby="projects-list-heading">
+    <h2 id="projects-list-heading" class="visually-hidden">Project list</h2>
+
+    {% if projects %}
+    <ul class="projects-list">
+        {% for project in projects %}
+        <li class="card project-list-card">
+            <div class="project-list-heading">
+                <h3>{{ project.name }}</h3>
+                <span class="status status-neutral">
+                    {{ project.status|default:"Status unavailable" }}
+                </span>
+            </div>
+
+            <div class="project-list-progress">
+                <span>Progress</span>
+                <progress
+                    max="100"
+                    value="{{ project.progress|default:0 }}"
+                    aria-label="Progress for {{ project.name }}"
+                >{{ project.progress|default:0 }}%</progress>
+                <span>{{ project.progress|default:0 }}%</span>
+            </div>
+
+            <p class="project-list-due-date">
+                <span class="project-detail-label">Due date:</span>
+                {% if project.due_date %}
+                    {{ project.due_date|date:"M j, Y" }}
+                {% else %}
+                    Not set
+                {% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card projects-empty-state">
+        <h3>No projects yet</h3>
+        <p>When projects are available, they will appear here.</p>
+        <a class="button" href="#create-project">Create your first project</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
