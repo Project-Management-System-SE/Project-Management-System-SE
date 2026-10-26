@@ -1,0 +1,51 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}PMS | Project Management System{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Application sidebar">
+            <a class="brand" href="#dashboard">
+                <span class="brand-name">PMS</span>
+                <span class="brand-description">Project Management System</span>
+            </a>
+
+            <nav class="primary-navigation" aria-label="Primary navigation">
+                <ul>
+                    <li><a href="#dashboard">Dashboard</a></li>
+                    <li><a href="#projects">Projects</a></li>
+                    <li><a href="#my-tasks">My Tasks</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <div class="app-main">
+            <header class="topbar">
+                <div class="topbar-heading">
+                    {% block page_heading %}
+                    <h1>Project Management System</h1>
+                    {% endblock %}
+                </div>
+                <div class="topbar-actions">
+                    {% block header_actions %}{% endblock %}
+                </div>
+            </header>
+
+            <main class="main-content" id="main-content" tabindex="-1">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <script defer src="{% static 'js/main.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
