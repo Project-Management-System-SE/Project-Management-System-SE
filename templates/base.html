@@ -20,11 +20,10 @@
 
             <nav class="primary-navigation" aria-label="Primary navigation">
                 <ul>
-                    <li><span class="navigation-item" aria-disabled="true">Dashboard</span></li>
-                    <li><span class="navigation-item" aria-disabled="true">Projects</span></li>
+                    <li><a class="navigation-item" href="{% url 'projects:dashboard' %}">Dashboard</a></li>
+                    <li><a class="navigation-item" href="{% url 'projects:project-list' %}">Projects</a></li>
                     <li><span class="navigation-item" aria-disabled="true">My Tasks</span></li>
                 </ul>
-                <p class="navigation-note">Navigation awaits backend route integration.</p>
             </nav>
         </aside>
 
@@ -36,6 +35,15 @@
                     {% endblock %}
                 </div>
                 <div class="topbar-actions">
+                    {% if user.is_authenticated %}
+                    <span>{{ user.full_name|default:user.email }}</span>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="button button-secondary" type="submit">Log out</button>
+                    </form>
+                    {% else %}
+                    <a class="button" href="{% url 'login' %}">Log in</a>
+                    {% endif %}
                     {% block header_actions %}{% endblock %}
                 </div>
             </header>
