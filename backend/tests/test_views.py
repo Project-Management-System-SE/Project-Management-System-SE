@@ -1,21 +1,11 @@
-from pathlib import Path
 from unittest.mock import patch
 
 from django.db import IntegrityError
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import User
 from projects.models import Project, ProjectMembership
-
-TEST_TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [Path(__file__).resolve().parent / "templates"],
-        "APP_DIRS": False,
-        "OPTIONS": {},
-    }
-]
 
 
 def create_user(email, username, full_name):
@@ -39,10 +29,15 @@ def project_payload(**overrides):
     return payload
 
 
-@override_settings(TEMPLATES=TEST_TEMPLATES)
 class DashboardViewTests(TestCase):
     def setUp(self):
         self.owner = create_user("owner@example.com", "owner", "Project Owner")
+        self.admin = User.objects.create_superuser(
+            email="admin@example.com",
+            username="admin",
+            full_name="System Admin",
+            password="safe-password-123",
+        )
 
     def test_dashboard_supplies_template_context(self):
         Project.objects.create(
@@ -61,6 +56,32 @@ class DashboardViewTests(TestCase):
         self.assertIsNone(response.context["my_tasks"])
         self.assertIsNone(response.context["completed_tasks"])
         self.assertEqual(len(response.context["projects"]), 2)
+        self.assertContains(response, "Active project")
+        self.assertContains(response, "Planned project")
+        self.assertContains(response, "Progress unavailable")
+        self.assertContains(response, "—")
+
+    def test_dashboard_renders_empty_state(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("projects:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No projects to show yet")
+        self.assertContains(response, "Create your first project")
+
+    def test_dashboard_limits_recent_projects_to_five(self):
+        for index in range(6):
+            Project.objects.create(
+                name=f"Project {index}",
+                owner=self.owner,
+            )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["projects"]), 5)
 
     def test_dashboard_alias_renders(self):
         self.client.force_login(self.owner)
@@ -93,7 +114,6 @@ class DashboardViewTests(TestCase):
         )
 
 
-@override_settings(TEMPLATES=TEST_TEMPLATES)
 class ProjectVisibilityTests(TestCase):
     def setUp(self):
         self.owner = create_user("owner@example.com", "owner", "Project Owner")
@@ -151,10 +171,182 @@ class ProjectVisibilityTests(TestCase):
 
         response = self.client.get(reverse("projects:project-list"))
 
+        self.assertEqual(response.status_code, 200)
         self.assertNotIn(self.project, response.context["projects"])
 
 
-@override_settings(TEMPLATES=TEST_TEMPLATES)
+class ProjectViewTests(TestCase):
+    def setUp(self):
+        self.owner = create_user("owner@example.com", "owner", "Project Owner")
+        self.admin = User.objects.create_superuser(
+            email="admin@example.com",
+            username="admin",
+            full_name="System Admin",
+            password="safe-password-123",
+        )
+
+    def test_project_list_supplies_projects(self):
+        Project.objects.create(name="PMS", owner=self.owner)
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:project-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["projects"]), [Project.objects.get()])
+        self.assertContains(response, "PMS")
+
+    def test_project_list_renders_empty_state(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("projects:project-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No projects yet")
+        self.assertContains(response, "Create your first project")
+
+    def test_project_list_renders_project_fields(self):
+        Project.objects.create(
+            name="Release planning",
+            description="Plan the release",
+            owner=self.owner,
+            status=Project.Status.ON_HOLD,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:project-list"))
+
+        self.assertContains(response, "Release planning")
+        self.assertContains(response, "ON_HOLD")
+        self.assertContains(response, "Progress unavailable")
+        project = response.context["projects"][0]
+        self.assertEqual(project.description, "Plan the release")
+
+    def test_project_form_supplies_template_fields(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("projects:project-create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("form", response.context)
+        self.assertEqual(
+            list(response.context["project_status_choices"]),
+            [
+                (Project.Status.PLANNED, "Planned"),
+                (Project.Status.ACTIVE, "Active"),
+            ],
+        )
+        self.assertContains(response, 'name="csrfmiddlewaretoken"')
+        self.assertContains(response, "Planned")
+        self.assertContains(response, "Active")
+        self.assertNotContains(response, "Archived")
+
+    def test_authenticated_user_can_create_project(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("projects:project-create"),
+            project_payload(
+                name="New project",
+                status=Project.Status.ACTIVE,
+            ),
+        )
+
+        self.assertRedirects(response, reverse("projects:project-list"))
+        project = Project.objects.get()
+        self.assertEqual(project.owner, self.admin)
+        self.assertEqual(project.status, Project.Status.ACTIVE)
+
+    def test_project_creation_with_default_status_sets_owner(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("projects:project-create"),
+            project_payload(
+                name="Default status project",
+                status=Project.Status.PLANNED,
+            ),
+        )
+
+        self.assertRedirects(response, reverse("projects:project-list"))
+        project = Project.objects.get(name="Default status project")
+        self.assertEqual(project.owner, self.admin)
+        self.assertEqual(project.status, Project.Status.PLANNED)
+
+    def test_project_creation_requires_csrf_token(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.admin)
+        client.get(reverse("projects:project-create"))
+        post_data = project_payload(name="CSRF protected project")
+
+        missing_token_response = client.post(
+            reverse("projects:project-create"),
+            post_data,
+        )
+
+        self.assertEqual(missing_token_response.status_code, 403)
+        self.assertFalse(
+            Project.objects.filter(name="CSRF protected project").exists()
+        )
+
+        csrf_token = client.cookies["csrftoken"].value
+        response = client.post(
+            reverse("projects:project-create"),
+            post_data,
+            HTTP_X_CSRFTOKEN=csrf_token,
+        )
+
+        self.assertRedirects(response, reverse("projects:project-list"))
+        self.assertTrue(
+            Project.objects.filter(
+                name="CSRF protected project",
+                owner=self.admin,
+            ).exists()
+        )
+
+    def test_anonymous_user_cannot_create_project(self):
+        response = self.client.post(
+            reverse("projects:project-create"),
+            project_payload(name="Anonymous project"),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{reverse('login')}?next={reverse('projects:project-create')}",
+        )
+        self.assertFalse(Project.objects.filter(name="Anonymous project").exists())
+
+    def test_invalid_project_data_is_rejected(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("projects:project-create"),
+            project_payload(name=""),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Project.objects.exists())
+        self.assertIn("name", response.context["form"].errors)
+        self.assertContains(response, "This field is required.")
+
+    def test_invalid_status_is_rejected_by_project_view(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse("projects:project-create"),
+            project_payload(
+                name="Invalid status project",
+                status="UNKNOWN",
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            Project.objects.filter(name="Invalid status project").exists()
+        )
+        self.assertIn("status", response.context["form"].errors)
+
+
 class ProjectCreateTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser(
@@ -327,7 +519,6 @@ class ProjectCreateTests(TestCase):
         self.assertEqual(Project.objects.filter(name="").count(), 0)
 
 
-@override_settings(TEMPLATES=TEST_TEMPLATES)
 class ProjectCreateTransactionTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser(
