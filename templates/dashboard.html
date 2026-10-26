@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Dashboard</h1>
+{% endblock %}
+
+{% block content %}
+<section class="dashboard-intro" aria-labelledby="dashboard-intro-title">
+    <div>
+        <h2 id="dashboard-intro-title">Your workspace at a glance</h2>
+        <p>Welcome back. Review project activity and your task progress here.</p>
+    </div>
+    <a class="button" href="#create-project">Create project</a>
+</section>
+
+<section class="dashboard-summary-grid" aria-label="Project and task summary">
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Total Projects</h2>
+        <p class="summary-value">{{ total_projects|default:"0" }}</p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Active Projects</h2>
+        <p class="summary-value">{{ active_projects|default:"0" }}</p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">My Tasks</h2>
+        <p class="summary-value">{{ my_tasks|default:"0" }}</p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Completed Tasks</h2>
+        <p class="summary-value">{{ completed_tasks|default:"0" }}</p>
+    </article>
+</section>
+
+<section class="dashboard-projects" aria-labelledby="recent-projects-heading">
+    <div class="dashboard-section-heading">
+        <div>
+            <h2 id="recent-projects-heading">Recent Projects</h2>
+            <p>Check the latest status and progress for your projects.</p>
+        </div>
+    </div>
+
+    {% if projects %}
+    <ul class="dashboard-project-list">
+        {% for project in projects %}
+        <li class="card dashboard-project-card">
+            <div class="project-card-heading">
+                <h3>{{ project.name }}</h3>
+                <span class="status status-neutral">{{ project.status|default:"Status unavailable" }}</span>
+            </div>
+            <div class="project-progress">
+                <span>Progress</span>
+                <progress
+                    max="100"
+                    value="{{ project.progress|default:0 }}"
+                    aria-label="Progress for {{ project.name }}"
+                >{{ project.progress|default:0 }}%</progress>
+                <span>{{ project.progress|default:0 }}%</span>
+            </div>
+            <p class="project-due-date">
+                <span class="project-detail-label">Due date:</span>
+                {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card dashboard-empty-state">
+        <h3>No projects to show yet</h3>
+        <p>Projects will appear here once they have been created.</p>
+        <a class="button" href="#create-project">Create your first project</a>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
