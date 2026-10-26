@@ -9,7 +9,7 @@
 {% block content %}
 <section class="project-form-intro" aria-labelledby="project-form-heading">
     <h2 id="project-form-heading">Set up a project</h2>
-    <p>Enter the project details below. You can update them later.</p>
+    <p>Enter the project details below. Form submission is pending backend integration and agreement on project fields.</p>
 </section>
 
 <form class="card project-form" method="post">
@@ -28,7 +28,6 @@
             name="name"
             type="text"
             value="{{ form.name.value|default:'' }}"
-            maxlength="150"
             autocomplete="off"
             required
             aria-describedby="project-name-help{% if form.name.errors %} project-name-errors{% endif %}"
@@ -56,19 +55,19 @@
     </div>
 
     <div class="form-field">
-        <label for="project-status">Status <span aria-hidden="true">*</span></label>
+        <label for="project-status">Status</label>
         <select
             id="project-status"
             name="status"
-            required
             aria-describedby="project-status-help{% if form.status.errors %} project-status-errors{% endif %}"
             {% if form.status.errors %}aria-invalid="true"{% endif %}
+            {% if not project_status_choices %}disabled{% endif %}
         >
             <option value="">Select a status</option>
             {% for value, label in project_status_choices %}
             <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
             {% empty %}
-            <option value="" disabled>Status options are not configured yet</option>
+            <option value="" selected>Status options await team agreement</option>
             {% endfor %}
         </select>
         <small class="field-help" id="project-status-help">Status choices will be supplied when the team agrees on project statuses.</small>
@@ -78,8 +77,10 @@
     </div>
 
     <div class="project-form-actions">
-        <button type="submit">Create Project</button>
-        <a class="button button-secondary" href="#projects">Cancel</a>
+        <button type="submit" disabled aria-describedby="project-submit-note">Create Project</button>
+        <button class="button button-secondary" type="button" disabled aria-describedby="project-cancel-note">Cancel</button>
     </div>
+    <p class="integration-note" id="project-submit-note">Enable after a project-creation route and agreed fields are connected.</p>
+    <p class="integration-note" id="project-cancel-note">Cancel navigation will be connected with the projects route.</p>
 </form>
 {% endblock %}
