@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Log in | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Log in</h1>
+{% endblock %}
+
+{% block content %}
+<section class="project-form-intro" aria-labelledby="login-heading">
+    <h2 id="login-heading">Sign in to your workspace</h2>
+    <p>Use the email address and password for your PMS account.</p>
+</section>
+
+<form class="card project-form" method="post">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert" aria-live="polite">
+        {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    <div class="form-field">
+        <label for="{{ form.username.id_for_label }}">Email</label>
+        {{ form.username }}
+        {% if form.username.errors %}
+        <div class="field-errors" role="alert">{{ form.username.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="form-field">
+        <label for="{{ form.password.id_for_label }}">Password</label>
+        {{ form.password }}
+        {% if form.password.errors %}
+        <div class="field-errors" role="alert">{{ form.password.errors }}</div>
+        {% endif %}
+    </div>
+
+    {% if next %}
+    <input type="hidden" name="next" value="{{ next }}">
+    {% endif %}
+
+    <div class="project-form-actions">
+        <button type="submit">Log in</button>
+    </div>
+</form>
+{% endblock %}
