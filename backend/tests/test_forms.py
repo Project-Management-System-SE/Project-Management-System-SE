@@ -28,6 +28,26 @@ class ProjectFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("name", form.errors)
 
+    def test_name_length_boundary_is_enforced(self):
+        valid_form = ProjectForm(
+            data={
+                "name": "P" * 200,
+                "description": "",
+                "status": Project.Status.PLANNED,
+            }
+        )
+        invalid_form = ProjectForm(
+            data={
+                "name": "P" * 201,
+                "description": "",
+                "status": Project.Status.PLANNED,
+            }
+        )
+
+        self.assertTrue(valid_form.is_valid())
+        self.assertFalse(invalid_form.is_valid())
+        self.assertIn("name", invalid_form.errors)
+
     def test_status_must_be_a_documented_choice(self):
         form = ProjectForm(
             data={

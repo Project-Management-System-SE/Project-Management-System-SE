@@ -69,6 +69,18 @@ class ProjectModelTests(TestCase):
                     due_date=date(2026, 10, 1),
                 )
 
+    def test_project_allows_due_date_on_start_date(self):
+        same_day = date(2026, 10, 10)
+        project = Project.objects.create(
+            name="Single-day project",
+            owner=self.user,
+            start_date=same_day,
+            due_date=same_day,
+        )
+
+        self.assertEqual(project.start_date, same_day)
+        self.assertEqual(project.due_date, same_day)
+
     def test_membership_is_unique_per_project_and_user(self):
         project = Project.objects.create(name="PMS", owner=self.user)
         ProjectMembership.objects.create(

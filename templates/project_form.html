@@ -9,7 +9,7 @@
 {% block content %}
 <section class="project-form-intro" aria-labelledby="project-form-heading">
     <h2 id="project-form-heading">Set up a project</h2>
-    <p>Enter the project details below. Form submission is pending backend integration and agreement on project fields.</p>
+    <p>Enter the project details below to create a project.</p>
 </section>
 
 <form class="card project-form" method="post">
@@ -61,26 +61,20 @@
             name="status"
             aria-describedby="project-status-help{% if form.status.errors %} project-status-errors{% endif %}"
             {% if form.status.errors %}aria-invalid="true"{% endif %}
-            {% if not project_status_choices %}disabled{% endif %}
         >
-            <option value="">Select a status</option>
             {% for value, label in project_status_choices %}
             <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
-            {% empty %}
-            <option value="" selected>Status options await team agreement</option>
             {% endfor %}
         </select>
-        <small class="field-help" id="project-status-help">Status choices will be supplied when the team agrees on project statuses.</small>
+        <small class="field-help" id="project-status-help">Choose the current project status.</small>
         {% if form.status.errors %}
         <div class="field-errors" id="project-status-errors" role="alert">{{ form.status.errors }}</div>
         {% endif %}
     </div>
 
     <div class="project-form-actions">
-        <button type="submit" disabled aria-describedby="project-submit-note">Create Project</button>
-        <button class="button button-secondary" type="button" disabled aria-describedby="project-cancel-note">Cancel</button>
+        <button type="submit">Create Project</button>
+        <a class="button button-secondary" href="{% url 'projects:project-list' %}">Cancel</a>
     </div>
-    <p class="integration-note" id="project-submit-note">Enable after a project-creation route and agreed fields are connected.</p>
-    <p class="integration-note" id="project-cancel-note">Cancel navigation will be connected with the projects route.</p>
 </form>
 {% endblock %}

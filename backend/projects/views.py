@@ -1,3 +1,4 @@
+from django.contrib import messages
 from django.shortcuts import redirect, render
 
 from .forms import ProjectForm
@@ -33,6 +34,7 @@ def project_create(request):
             project = form.save(commit=False)
             project.owner = request.user
             project.save()
+            messages.success(request, "Project created successfully.")
             return redirect("projects:project-list")
     else:
         form = ProjectForm()
