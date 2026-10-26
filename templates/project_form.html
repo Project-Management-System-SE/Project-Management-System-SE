@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Create Project | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Create Project</h1>
+{% endblock %}
+
+{% block content %}
+<section class="project-form-intro" aria-labelledby="project-form-heading">
+    <h2 id="project-form-heading">Set up a project</h2>
+    <p>Enter the project details below. Form submission is pending backend integration and agreement on project fields.</p>
+</section>
+
+<form class="card project-form" method="post">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert" aria-live="polite">
+        {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    <div class="form-field">
+        <label for="project-name">Project name <span aria-hidden="true">*</span></label>
+        <input
+            id="project-name"
+            name="name"
+            type="text"
+            value="{{ form.name.value|default:'' }}"
+            autocomplete="off"
+            required
+            aria-describedby="project-name-help{% if form.name.errors %} project-name-errors{% endif %}"
+            {% if form.name.errors %}aria-invalid="true"{% endif %}
+        >
+        <small class="field-help" id="project-name-help">A clear name helps your team identify this project.</small>
+        {% if form.name.errors %}
+        <div class="field-errors" id="project-name-errors" role="alert">{{ form.name.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="form-field">
+        <label for="project-description">Description</label>
+        <textarea
+            id="project-description"
+            name="description"
+            rows="5"
+            aria-describedby="project-description-help{% if form.description.errors %} project-description-errors{% endif %}"
+            {% if form.description.errors %}aria-invalid="true"{% endif %}
+        >{{ form.description.value|default:'' }}</textarea>
+        <small class="field-help" id="project-description-help">Optionally describe the project's goals and scope.</small>
+        {% if form.description.errors %}
+        <div class="field-errors" id="project-description-errors" role="alert">{{ form.description.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="form-field">
+        <label for="project-status">Status</label>
+        <select
+            id="project-status"
+            name="status"
+            aria-describedby="project-status-help{% if form.status.errors %} project-status-errors{% endif %}"
+            {% if form.status.errors %}aria-invalid="true"{% endif %}
+            {% if not project_status_choices %}disabled{% endif %}
+        >
+            <option value="">Select a status</option>
+            {% for value, label in project_status_choices %}
+            <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
+            {% empty %}
+            <option value="" selected>Status options await team agreement</option>
+            {% endfor %}
+        </select>
+        <small class="field-help" id="project-status-help">Status choices will be supplied when the team agrees on project statuses.</small>
+        {% if form.status.errors %}
+        <div class="field-errors" id="project-status-errors" role="alert">{{ form.status.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="project-form-actions">
+        <button type="submit" disabled aria-describedby="project-submit-note">Create Project</button>
+        <button class="button button-secondary" type="button" disabled aria-describedby="project-cancel-note">Cancel</button>
+    </div>
+    <p class="integration-note" id="project-submit-note">Enable after a project-creation route and agreed fields are connected.</p>
+    <p class="integration-note" id="project-cancel-note">Cancel navigation will be connected with the projects route.</p>
+</form>
+{% endblock %}

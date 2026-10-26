@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Dashboard</h1>
+{% endblock %}
+
+{% block content %}
+<section class="dashboard-intro" aria-labelledby="dashboard-intro-title">
+    <div>
+        <h2 id="dashboard-intro-title">Your workspace at a glance</h2>
+        <p>Welcome back. Review project activity and your task progress here.</p>
+    </div>
+    <div class="pending-action">
+        <button class="button" type="button" disabled aria-describedby="dashboard-create-project-note">Create project</button>
+        <small class="integration-note" id="dashboard-create-project-note">Available when project routes are connected.</small>
+    </div>
+</section>
+
+<section class="dashboard-summary-grid" aria-label="Project and task summary">
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Total Projects</h2>
+        <p class="summary-value">
+            {% if total_projects == 0 %}0{% elif total_projects %}{{ total_projects }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+        </p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Active Projects</h2>
+        <p class="summary-value">
+            {% if active_projects == 0 %}0{% elif active_projects %}{{ active_projects }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+        </p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">My Tasks</h2>
+        <p class="summary-value">
+            {% if my_tasks == 0 %}0{% elif my_tasks %}{{ my_tasks }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+        </p>
+    </article>
+    <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Completed Tasks</h2>
+        <p class="summary-value">
+            {% if completed_tasks == 0 %}0{% elif completed_tasks %}{{ completed_tasks }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+        </p>
+    </article>
+</section>
+
+<section class="dashboard-projects" aria-labelledby="recent-projects-heading">
+    <div class="dashboard-section-heading">
+        <div>
+            <h2 id="recent-projects-heading">Recent Projects</h2>
+            <p>Check the latest status and progress for your projects.</p>
+        </div>
+    </div>
+
+    {% if projects %}
+    <ul class="dashboard-project-list">
+        {% for project in projects %}
+        <li class="card dashboard-project-card">
+            <div class="project-card-heading">
+                <h3>{{ project.name }}</h3>
+                <span class="status status-neutral">{{ project.status|default:"Status unavailable" }}</span>
+            </div>
+            <div class="project-progress">
+                <span>Progress</span>
+                {% if project.progress or project.progress == 0 %}
+                <progress
+                    max="100"
+                    value="{{ project.progress }}"
+                    aria-label="Progress for {{ project.name }}"
+                >{{ project.progress }}%</progress>
+                <span>{{ project.progress }}%</span>
+                {% else %}
+                <span class="progress-unavailable" aria-label="Progress unavailable until backend data is connected">—</span>
+                {% endif %}
+            </div>
+            <p class="project-due-date">
+                <span class="project-detail-label">Due date:</span>
+                {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card dashboard-empty-state">
+        <h3>No projects to show yet</h3>
+        <p>Projects will appear here once they have been created.</p>
+        <div class="pending-action">
+            <button class="button" type="button" disabled aria-describedby="dashboard-empty-create-note">Create your first project</button>
+            <small class="integration-note" id="dashboard-empty-create-note">Available when project routes are connected.</small>
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

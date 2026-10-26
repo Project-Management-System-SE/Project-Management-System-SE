@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Projects | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Projects</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="projects-intro-heading">
+    <div>
+        <h2 id="projects-intro-heading">Manage your projects</h2>
+        <p>View project status, progress, and upcoming due dates.</p>
+    </div>
+    <div class="pending-action">
+        <button class="button" type="button" disabled aria-describedby="projects-create-note">Create Project</button>
+        <small class="integration-note" id="projects-create-note">Available when project routes are connected.</small>
+    </div>
+</section>
+
+<section class="projects-list-section" aria-labelledby="projects-list-heading">
+    <h2 id="projects-list-heading" class="visually-hidden">Project list</h2>
+
+    {% if projects %}
+    <ul class="projects-list">
+        {% for project in projects %}
+        <li class="card project-list-card">
+            <div class="project-list-heading">
+                <h3>{{ project.name }}</h3>
+                <span class="status status-neutral">
+                    {{ project.status|default:"Status unavailable" }}
+                </span>
+            </div>
+
+            <div class="project-list-progress">
+                <span>Progress</span>
+                {% if project.progress or project.progress == 0 %}
+                <progress
+                    max="100"
+                    value="{{ project.progress }}"
+                    aria-label="Progress for {{ project.name }}"
+                >{{ project.progress }}%</progress>
+                <span>{{ project.progress }}%</span>
+                {% else %}
+                <span class="progress-unavailable" aria-label="Progress unavailable until backend data is connected">—</span>
+                {% endif %}
+            </div>
+
+            <p class="project-list-due-date">
+                <span class="project-detail-label">Due date:</span>
+                {% if project.due_date %}
+                    {{ project.due_date|date:"M j, Y" }}
+                {% else %}
+                    Not set
+                {% endif %}
+            </p>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card projects-empty-state">
+        <h3>No projects yet</h3>
+        <p>When projects are available, they will appear here.</p>
+        <div class="pending-action">
+            <button class="button" type="button" disabled aria-describedby="projects-empty-create-note">Create your first project</button>
+            <small class="integration-note" id="projects-empty-create-note">Available when project routes are connected.</small>
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
