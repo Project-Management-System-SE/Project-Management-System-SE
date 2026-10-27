@@ -28,7 +28,7 @@ from .notifications import (
     notify_task_comment,
     notify_task_status_change,
 )
-from .permissions import can_create_task_in, can_edit_task, can_view_tasks_for
+from .permissions import can_create_task_in, can_delete_task, can_edit_task, can_reassign_task, can_view_tasks_for
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +193,9 @@ def task_create(request, project_id):
     if request.method == "POST":
         form = TaskForm(request.POST, project=project)
         if form.is_valid():
+            new_assignee = form.cleaned_data.get("assignee")
+            if new_assignee != task.assignee and not can_reassign_task(request.user, task):
+                raise PermissionDenied("You do not have permission to reassign this task.")
             with transaction.atomic():
                 task = form.save(commit=False)
                 task.project = project
@@ -418,7 +421,7 @@ def task_update_status(request, project_id, task_id):
 def task_delete(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(project.tasks, pk=task_id)
-    if not can_manage_project(request.user, project):
+    if not can_delete_task(request.user, task):
         raise PermissionDenied("You do not have permission to delete this task.")
 
     if request.method == "POST":
