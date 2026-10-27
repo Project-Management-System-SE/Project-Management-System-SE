@@ -10,9 +10,13 @@
 <section class="dashboard-intro" aria-labelledby="dashboard-intro-title">
     <div>
         <h2 id="dashboard-intro-title">Your workspace at a glance</h2>
-        <p>Review project activity and your task progress here.</p>
+        <p>Welcome back. Review project activity and your task progress here.</p>
     </div>
-    <a class="button" href="{% url 'projects:project-create' %}">Create project</a>
+    {% if can_create_project %}
+    <div class="pending-action">
+        <a class="button" href="{% url 'projects:project-create' %}">Create project</a>
+    </div>
+    {% endif %}
 </section>
 
 <section class="dashboard-summary-grid" aria-label="Project and task summary">
@@ -74,7 +78,11 @@
     <div class="card dashboard-empty-state">
         <h3>No projects to show yet</h3>
         <p>Projects will appear here once they have been created.</p>
-        <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
+        {% if can_create_project %}
+        <div class="pending-action">
+            <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 </section>

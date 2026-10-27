@@ -35,6 +35,15 @@
                     {% endblock %}
                 </div>
                 <div class="topbar-actions">
+                    {% if user.is_authenticated %}
+                    <span>{{ user.full_name|default:user.email }}</span>
+                    <form method="post" action="{% url 'logout' %}">
+                        {% csrf_token %}
+                        <button class="button button-secondary" type="submit">Log out</button>
+                    </form>
+                    {% else %}
+                    <a class="button" href="{% url 'login' %}">Log in</a>
+                    {% endif %}
                     {% block header_actions %}{% endblock %}
                 </div>
             </header>

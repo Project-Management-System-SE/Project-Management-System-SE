@@ -8,6 +8,18 @@ from projects.models import Project, ProjectMembership
 
 
 class UserModelTests(TestCase):
+    def test_create_user_requires_email_username_and_full_name(self):
+        missing_fields = (
+            {"email": "", "username": "member", "full_name": "Team Member"},
+            {"email": "member@example.com", "username": "", "full_name": "Team Member"},
+            {"email": "member@example.com", "username": "member", "full_name": ""},
+        )
+
+        for fields in missing_fields:
+            with self.subTest(fields=fields):
+                with self.assertRaises(ValueError):
+                    User.objects.create_user(**fields, password="safe-password-123")
+
     def test_create_user_hashes_the_password(self):
         user = User.objects.create_user(
             email="member@example.com",
@@ -32,6 +44,16 @@ class UserModelTests(TestCase):
         self.assertTrue(user.is_staff)
         self.assertTrue(user.is_superuser)
         self.assertTrue(user.is_admin)
+
+    def test_create_superuser_rejects_non_admin_flags(self):
+        with self.assertRaises(ValueError):
+            User.objects.create_superuser(
+                email="admin@example.com",
+                username="admin",
+                full_name="System Admin",
+                password="safe-password-123",
+                is_staff=False,
+            )
 
     def test_email_is_the_authentication_identifier(self):
         user = User.objects.create_user(
@@ -69,7 +91,13 @@ class ProjectModelTests(TestCase):
                     due_date=date(2026, 10, 1),
                 )
 
-    def test_project_allows_due_date_on_start_date(self):
+    def test_project_accepts_missing_dates(self):
+        project = Project.objects.create(name="Undated project", owner=self.user)
+
+        self.assertIsNone(project.start_date)
+        self.assertIsNone(project.due_date)
+
+    def test_due_date_may_match_start_date(self):
         same_day = date(2026, 10, 10)
         project = Project.objects.create(
             name="Single-day project",

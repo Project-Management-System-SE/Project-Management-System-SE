@@ -10,9 +10,13 @@
 <section class="projects-intro" aria-labelledby="projects-intro-heading">
     <div>
         <h2 id="projects-intro-heading">Manage your projects</h2>
-        <p>View project details and status.</p>
+        <p>View project status, progress, and upcoming due dates.</p>
     </div>
-    <a class="button" href="{% url 'projects:project-create' %}">Create Project</a>
+    {% if can_create_project %}
+    <div class="pending-action">
+        <a class="button" href="{% url 'projects:project-create' %}">Create Project</a>
+    </div>
+    {% endif %}
 </section>
 
 <section class="projects-list-section" aria-labelledby="projects-list-heading">
@@ -49,7 +53,11 @@
     <div class="card projects-empty-state">
         <h3>No projects yet</h3>
         <p>When projects are available, they will appear here.</p>
-        <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
+        {% if can_create_project %}
+        <div class="pending-action">
+            <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 </section>

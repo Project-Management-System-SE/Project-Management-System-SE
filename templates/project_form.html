@@ -9,7 +9,7 @@
 {% block content %}
 <section class="project-form-intro" aria-labelledby="project-form-heading">
     <h2 id="project-form-heading">Set up a project</h2>
-    <p>Enter the project details below to create a project.</p>
+    <p>Enter the project details below. Projects start as Planned or Active.</p>
 </section>
 
 <form class="card project-form" method="post">
@@ -55,6 +55,38 @@
     </div>
 
     <div class="form-field">
+        <label for="project-start-date">Start date</label>
+        <input
+            id="project-start-date"
+            name="start_date"
+            type="date"
+            value="{{ form.start_date.value|date:'Y-m-d' }}"
+            aria-describedby="project-start-date-help{% if form.start_date.errors %} project-start-date-errors{% endif %}"
+            {% if form.start_date.errors %}aria-invalid="true"{% endif %}
+        >
+        <small class="field-help" id="project-start-date-help">Optional start date for the project.</small>
+        {% if form.start_date.errors %}
+        <div class="field-errors" id="project-start-date-errors" role="alert">{{ form.start_date.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="form-field">
+        <label for="project-due-date">Due date</label>
+        <input
+            id="project-due-date"
+            name="due_date"
+            type="date"
+            value="{{ form.due_date.value|date:'Y-m-d' }}"
+            aria-describedby="project-due-date-help{% if form.due_date.errors %} project-due-date-errors{% endif %}"
+            {% if form.due_date.errors %}aria-invalid="true"{% endif %}
+        >
+        <small class="field-help" id="project-due-date-help">Optional due date; it cannot be earlier than the start date.</small>
+        {% if form.due_date.errors %}
+        <div class="field-errors" id="project-due-date-errors" role="alert">{{ form.due_date.errors }}</div>
+        {% endif %}
+    </div>
+
+    <div class="form-field">
         <label for="project-status">Status</label>
         <select
             id="project-status"
@@ -66,7 +98,7 @@
             <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
             {% endfor %}
         </select>
-        <small class="field-help" id="project-status-help">Choose the current project status.</small>
+        <small class="field-help" id="project-status-help">New projects may start as Planned or Active.</small>
         {% if form.status.errors %}
         <div class="field-errors" id="project-status-errors" role="alert">{{ form.status.errors }}</div>
         {% endif %}

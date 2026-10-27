@@ -39,3 +39,7 @@ class UrlTests(SimpleTestCase):
         self.assertEqual(reverse("projects:dashboard"), "/")
         self.assertEqual(reverse("projects:project-list"), "/projects/")
         self.assertEqual(reverse("projects:project-create"), "/projects/new/")
+
+    def test_auth_routes_reverse(self):
+        self.assertEqual(reverse("login"), "/accounts/login/")
+        self.assertEqual(reverse("logout"), "/accounts/logout/")
