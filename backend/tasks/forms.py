@@ -130,6 +130,24 @@ class TaskForm(forms.ModelForm):
             self.fields["sprint"].queryset = Sprint.objects.none()
             self.fields["milestone"].queryset = Milestone.objects.none()
 
+    def clean_title(self):
+        title = self.cleaned_data.get("title", "")
+        if title:
+            stripped = title.strip()
+            if len(stripped) < 3:
+                raise forms.ValidationError("Task title must be at least 3 characters long.")
+            if "<script" in stripped.lower() or "javascript:" in stripped.lower():
+                raise forms.ValidationError("Task title contains prohibited script elements.")
+            return stripped
+        return title
+
+    def clean_due_date(self):
+        due_date = self.cleaned_data.get("due_date")
+        if due_date and self.project and self.project.start_date:
+            if due_date < self.project.start_date:
+                raise forms.ValidationError("Due date cannot precede the project start date.")
+        return due_date
+
     def clean_labels(self):
         raw_labels = self.cleaned_data.get("labels", "")
         if not raw_labels:
