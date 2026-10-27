@@ -93,13 +93,9 @@
             name="status"
             aria-describedby="project-status-help{% if form.status.errors %} project-status-errors{% endif %}"
             {% if form.status.errors %}aria-invalid="true"{% endif %}
-            {% if not project_status_choices %}disabled{% endif %}
         >
-            <option value="">Select a status</option>
             {% for value, label in project_status_choices %}
             <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
-            {% empty %}
-            <option value="" selected>Status options await team agreement</option>
             {% endfor %}
         </select>
         <small class="field-help" id="project-status-help">New projects may start as Planned or Active.</small>

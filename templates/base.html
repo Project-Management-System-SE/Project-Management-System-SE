@@ -49,12 +49,18 @@
             </header>
 
             <main class="main-content" id="main-content" tabindex="-1">
+                {% if messages %}
+                <div class="flash-messages" aria-label="Notifications">
+                    {% for message in messages %}
+                    <p class="flash-message flash-message-{{ message.tags }}" role="status">{{ message }}</p>
+                    {% endfor %}
+                </div>
+                {% endif %}
                 {% block content %}{% endblock %}
             </main>
         </div>
     </div>
 
-    <script defer src="{% static 'js/main.js' %}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -1,3 +1,4 @@
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
@@ -52,6 +53,7 @@ def project_create(request):
                     project_role=ProjectMembership.Role.PROJECT_MANAGER,
                 )
 
+            messages.success(request, "Project created successfully.")
             return redirect("projects:project-list")
     else:
         form = ProjectForm()
