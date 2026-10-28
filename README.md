@@ -82,3 +82,30 @@ source venv/bin/activate
 ```bash
 pip install -r backend/requirements.txt
 ```
+
+### 4. Configure email for password resets
+
+For local development, use Django's console email backend so reset links are printed in the
+development server output instead of requiring an SMTP account.
+
+```powershell
+# Windows PowerShell
+$env:DJANGO_EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+```
+
+```bash
+# Linux / macOS
+export DJANGO_EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+```
+
+For deployment, configure an SMTP backend and provide the mail server settings through
+environment variables: `DJANGO_EMAIL_BACKEND`, `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_PORT`,
+`DJANGO_EMAIL_HOST_USER`, `DJANGO_EMAIL_HOST_PASSWORD`, `DJANGO_EMAIL_USE_TLS`, and
+`DJANGO_DEFAULT_FROM_EMAIL`. Do not commit credentials. Password-reset links expire after 24 hours.
+
+### 5. Run the application
+
+```bash
+python backend/manage.py migrate
+python backend/manage.py runserver
+```

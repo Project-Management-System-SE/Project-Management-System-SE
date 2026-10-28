@@ -521,9 +521,58 @@ class ProjectCreateTransactionTests(TestCase):
 
 
 class LoginViewTests(TestCase):
+    def setUp(self):
+        self.email = "login@example.com"
+        self.password = "safe-password-123"
+        self.user = User.objects.create_user(
+            email=self.email,
+            username="login-user",
+            full_name="Login User",
+            password=self.password,
+        )
+
     def test_login_page_renders(self):
         response = self.client.get(reverse("login"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="username"')
         self.assertContains(response, 'name="password"')
+
+    def test_login_with_email_creates_authenticated_session(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": self.password},
+        )
+
+        self.assertRedirects(response, reverse("projects:dashboard"))
+        self.assertIn("sessionid", response.cookies)
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.user.pk))
+
+        dashboard_response = self.client.get(reverse("projects:dashboard"))
+        self.assertTrue(dashboard_response.wsgi_request.user.is_authenticated)
+
+    def test_login_rejects_invalid_password(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": "incorrect-password"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please enter a correct email and password.")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_logout_ends_authenticated_session(self):
+        self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": self.password},
+        )
+
+        response = self.client.post(reverse("logout"))
+
+        self.assertRedirects(response, reverse("login"))
+        self.assertNotIn("_auth_user_id", self.client.session)
+        dashboard_response = self.client.get(reverse("projects:dashboard"))
+        self.assertRedirects(
+            dashboard_response,
+            f"{reverse('login')}?next={reverse('projects:dashboard')}",
+        )
