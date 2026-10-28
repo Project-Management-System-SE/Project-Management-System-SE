@@ -42,6 +42,7 @@ def _get_visible_task(user, project_id, task_id):
         project_id=project_id,
     )
     if not can_view_tasks_for(user, task.project):
+        logger.warning(f"User {user.pk} attempted unauthorized view of task {task_id}")
         raise Http404
     return task
 
