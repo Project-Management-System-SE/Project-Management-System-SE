@@ -9,9 +9,9 @@ A Software Engineering project designed to build a centralized, web-based platfo
 | S.No. | Name | SRN | Role / Module Assignment |
 | :---: | :--- | :--- | :--- |
 | 1 | **Shivansh Sharma** | PES2UG24CS474 | Repo Setup, Architecture, CI/CD Pipeline |
-| 2 | **Shibi R Shetty** | PES2UG24CS467 | Frontend Development & Templates |
-| 3 | **Sheetal S Bevinakatti** | PES2UG24CS466 | Requirements Analysis, Testing & QA |
-| 4 | **Shivanagouda I Patil** | PES2UG24CS471 | Backend Architecture & Project Management Module |
+| 2 | **Shibi R Shetty** | PES2UG24CS467 | Backend Architecture & Project Management Module |
+| 3 | **Sheetal S Bevinakatti** | PES2UG24CS466 | Frontend Development , Testing & QA |
+| 4 | **Shivanagouda I Patil** | PES2UG24CS471 | Requirements Analysis & Project Documentation |
 
 ---
 
