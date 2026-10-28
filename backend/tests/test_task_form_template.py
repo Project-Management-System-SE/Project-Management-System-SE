@@ -268,3 +268,21 @@ class TaskFormTemplateTests(SimpleTestCase):
             'aria-describedby="external-guidelines id_notes_help id_notes_errors"',
             html,
         )
+
+    def test_multipart_enctype_rendered_when_form_is_multipart(self):
+        class MultipartTaskForm(TaskFormStub):
+            attachment = forms.FileField(required=False)
+
+        form = MultipartTaskForm()
+        self.assertTrue(form.is_multipart())
+
+        html = self.render_form(form)
+        self.assertIn('enctype="multipart/form-data"', html)
+
+    def test_required_field_indicator_includes_accessible_label(self):
+        form = TaskFormStub()
+        html = self.render_form(form)
+
+        # Title is required, so it should render both visual asterisk and accessible text
+        self.assertIn('<span aria-hidden="true">*</span>', html)
+        self.assertIn('<span class="visually-hidden"> (required)</span>', html)
