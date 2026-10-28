@@ -585,6 +585,25 @@ textarea::placeholder {
     background: var(--color-danger-bg);
 }
 
+.task-label {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    color: var(--color-text);
+    background: #e9edf3;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+
+.task-labels-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-top: 0.375rem;
+}
+
 .field-help {
     display: block;
     margin-top: 0.375rem;

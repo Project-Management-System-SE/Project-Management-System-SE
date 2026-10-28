@@ -30,4 +30,5 @@ urlpatterns = [
         name="password_reset_complete",
     ),
     path("", include("projects.urls")),
+    path("", include("tasks.urls")),
 ]
