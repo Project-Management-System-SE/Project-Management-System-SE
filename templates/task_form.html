@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% load task_form_tags %}
+
+{% block title %}{% firstof page_heading form_heading "Task" %} | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>{% firstof page_heading form_heading "Task" %}</h1>
+{% endblock %}
+
+{% block content %}
+<section class="project-form-intro" aria-labelledby="task-form-heading">
+    <h2 id="task-form-heading">{% firstof form_heading "Task details" %}</h2>
+    {% if form_intro %}<p>{{ form_intro }}</p>{% endif %}
+</section>
+
+<form class="card project-form task-form" method="post"{% if form_action %} action="{{ form_action }}"{% endif %} aria-labelledby="task-form-heading">
+    {% csrf_token %}
+
+    {% if save_error %}
+    <div class="form-errors task-form-save-error" role="alert" aria-live="assertive">{{ save_error }}</div>
+    {% endif %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert" aria-live="polite">
+        {{ form.non_field_errors }}
+    </div>
+    {% endif %}
+
+    {% for field in form.hidden_fields %}
+    {{ field }}
+    {% endfor %}
+
+    {% for field in form.visible_fields %}
+    <div class="form-field">
+        <label{% if field.id_for_label %} for="{{ field.id_for_label }}"{% endif %}>{{ field.label|default:field.name }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>
+        {{ field|accessible_widget }}
+        {% if field.help_text %}
+        <small class="field-help"{% if field.auto_id %} id="{{ field.auto_id }}_help"{% endif %}>{{ field.help_text }}</small>
+        {% endif %}
+        {% if field.errors %}
+        <div class="field-errors"{% if field.auto_id %} id="{{ field.auto_id }}_errors"{% endif %} role="alert">{{ field.errors }}</div>
+        {% endif %}
+    </div>
+    {% empty %}
+    <p class="task-form-empty">No task fields are available yet.</p>
+    {% endfor %}
+
+    <div class="project-form-actions">
+        <button type="submit">{% firstof submit_label "Save" %}</button>
+        {% if cancel_url %}
+        <a class="button button-secondary" href="{{ cancel_url }}">{% firstof cancel_label "Cancel" %}</a>
+        {% endif %}
+    </div>
+</form>
+{% endblock %}
