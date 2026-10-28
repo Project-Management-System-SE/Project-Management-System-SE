@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.name }} | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>{{ project.name }}</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="project-detail-heading">
+    <div>
+        <h2 id="project-detail-heading">Project details</h2>
+        <p>{{ project.get_status_display }}</p>
+    </div>
+    <div class="project-form-actions">
+        {% if can_manage_project %}
+        <a class="button" href="{% url 'projects:project-update' project.pk %}">Edit project</a>
+        {% if project.status != "ARCHIVED" %}
+        <form method="post" action="{% url 'projects:project-archive' project.pk %}">
+            {% csrf_token %}
+            <button class="button button-secondary" type="submit">Archive project</button>
+        </form>
+        {% endif %}
+        <a class="button button-secondary" href="{% url 'projects:project-delete' project.pk %}">Delete project</a>
+        {% endif %}
+    </div>
+</section>
+
+<section class="card" aria-labelledby="project-summary-heading">
+    <h2 id="project-summary-heading">Summary</h2>
+    <p>{{ project.description|default:"No description provided." }}</p>
+    <p>
+        <strong>Start date:</strong>
+        {% if project.start_date %}{{ project.start_date|date:"M j, Y" }}{% else %}Not set{% endif %}
+    </p>
+    <p>
+        <strong>Due date:</strong>
+        {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
+    </p>
+    <p><strong>Owner:</strong> {{ project.owner.full_name|default:project.owner.email }}</p>
+</section>
+
+<section class="card" aria-labelledby="project-members-heading">
+    <h2 id="project-members-heading">Project members</h2>
+    {% if memberships %}
+    <ul class="projects-list">
+        {% for membership in memberships %}
+        <li class="project-list-card">
+            <div class="project-list-heading">
+                <span>{{ membership.user.full_name|default:membership.user.email }}</span>
+                <span class="status status-neutral">{{ membership.get_project_role_display }}</span>
+            </div>
+            {% if can_manage_project and membership.user_id != project.owner_id %}
+            <form method="post" action="{% url 'projects:project-remove-member' project.pk membership.pk %}">
+                {% csrf_token %}
+                <button class="button button-secondary" type="submit">Remove member</button>
+            </form>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No members have been added to this project.</p>
+    {% endif %}
+</section>
+
+{% if can_manage_project %}
+<section class="card project-form" aria-labelledby="add-member-heading">
+    <h2 id="add-member-heading">Add a project member</h2>
+    {% if member_form.user.field.queryset %}
+    <form method="post" action="{% url 'projects:project-add-member' project.pk %}">
+        {% csrf_token %}
+        {% for field in member_form %}
+        <div class="form-field">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.errors %}
+            <div class="field-errors" role="alert">{{ field.errors }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% if member_form.non_field_errors %}
+        <div class="form-errors" role="alert">{{ member_form.non_field_errors }}</div>
+        {% endif %}
+        <div class="project-form-actions">
+            <button type="submit">Add member</button>
+        </div>
+    </form>
+    {% else %}
+    <p>There are no eligible users to add.</p>
+    {% endif %}
+</section>
+{% endif %}
+
+<p><a href="{% url 'projects:project-list' %}">Back to projects</a></p>
+{% endblock %}
