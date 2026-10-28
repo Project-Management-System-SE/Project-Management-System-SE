@@ -130,6 +130,17 @@ class TaskForm(forms.ModelForm):
             self.fields["sprint"].queryset = Sprint.objects.none()
             self.fields["milestone"].queryset = Milestone.objects.none()
 
+    def clean_assignee(self):
+        assignee = self.cleaned_data.get("assignee")
+        if assignee and self.project:
+            is_valid_assignee = (
+                self.project.owner_id == assignee.pk
+                or self.project.memberships.filter(user=assignee).exists()
+            )
+            if not is_valid_assignee:
+                raise forms.ValidationError("Selected assignee must be an active member or owner of this project.")
+        return assignee
+
     def clean_title(self):
         title = self.cleaned_data.get("title", "")
         if title:
