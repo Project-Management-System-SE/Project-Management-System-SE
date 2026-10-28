@@ -23,25 +23,25 @@
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">Total Projects</h2>
         <p class="summary-value">
-            {% if total_projects == 0 %}0{% elif total_projects %}{{ total_projects }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+            {{ total_projects }}
         </p>
     </article>
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">Active Projects</h2>
         <p class="summary-value">
-            {% if active_projects == 0 %}0{% elif active_projects %}{{ active_projects }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+            {{ active_projects }}
         </p>
     </article>
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">My Tasks</h2>
         <p class="summary-value">
-            {% if my_tasks == 0 %}0{% elif my_tasks %}{{ my_tasks }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+            <span aria-label="Task data unavailable">—</span>
         </p>
     </article>
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">Completed Tasks</h2>
         <p class="summary-value">
-            {% if completed_tasks == 0 %}0{% elif completed_tasks %}{{ completed_tasks }}{% else %}<span aria-label="Not available until backend data is connected">—</span>{% endif %}
+            <span aria-label="Task data unavailable">—</span>
         </p>
     </article>
 </section>
@@ -50,7 +50,7 @@
     <div class="dashboard-section-heading">
         <div>
             <h2 id="recent-projects-heading">Recent Projects</h2>
-            <p>Check the latest status and progress for your projects.</p>
+            <p>Check the latest status and progress availability for your projects.</p>
         </div>
     </div>
 
@@ -60,25 +60,20 @@
         <li class="card dashboard-project-card">
             <div class="project-card-heading">
                 <h3>{{ project.name }}</h3>
-                <span class="status status-neutral">{{ project.status|default:"Status unavailable" }}</span>
+                <span class="status status-neutral">{{ project.get_status_display|default:"Status unavailable" }}</span>
             </div>
             <div class="project-progress">
                 <span>Progress</span>
-                {% if project.progress or project.progress == 0 %}
-                <progress
-                    max="100"
-                    value="{{ project.progress }}"
-                    aria-label="Progress for {{ project.name }}"
-                >{{ project.progress }}%</progress>
-                <span>{{ project.progress }}%</span>
-                {% else %}
-                <span class="progress-unavailable" aria-label="Progress unavailable until backend data is connected">—</span>
-                {% endif %}
+                <span class="progress-unavailable" aria-label="Progress unavailable">—</span>
             </div>
             <p class="project-due-date">
                 <span class="project-detail-label">Due date:</span>
                 {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
             </p>
+            {% if project.description %}<p>{{ project.description }}</p>{% endif %}
+            <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">
+                View project
+            </a>
         </li>
         {% endfor %}
     </ul>

@@ -29,22 +29,13 @@
             <div class="project-list-heading">
                 <h3>{{ project.name }}</h3>
                 <span class="status status-neutral">
-                    {{ project.status|default:"Status unavailable" }}
+                    {{ project.get_status_display|default:"Status unavailable" }}
                 </span>
             </div>
-
+            {% if project.description %}<p>{{ project.description }}</p>{% endif %}
             <div class="project-list-progress">
                 <span>Progress</span>
-                {% if project.progress or project.progress == 0 %}
-                <progress
-                    max="100"
-                    value="{{ project.progress }}"
-                    aria-label="Progress for {{ project.name }}"
-                >{{ project.progress }}%</progress>
-                <span>{{ project.progress }}%</span>
-                {% else %}
-                <span class="progress-unavailable" aria-label="Progress unavailable until backend data is connected">—</span>
-                {% endif %}
+                <span class="progress-unavailable" aria-label="Progress unavailable">—</span>
             </div>
 
             <p class="project-list-due-date">
@@ -55,6 +46,14 @@
                     Not set
                 {% endif %}
             </p>
+            <div class="project-form-actions">
+                <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">
+                    View project
+                </a>
+                {% if project.pk in manageable_project_ids %}
+                <a class="button" href="{% url 'projects:project-update' project.pk %}">Edit project</a>
+                {% endif %}
+            </div>
         </li>
         {% endfor %}
     </ul>

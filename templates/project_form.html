@@ -1,15 +1,21 @@
 {% extends "base.html" %}
 
-{% block title %}Create Project | PMS{% endblock %}
+{% block title %}{% if is_update %}Edit Project{% else %}Create Project{% endif %} | PMS{% endblock %}
 
 {% block page_heading %}
-<h1>Create Project</h1>
+<h1>{% if is_update %}Edit Project{% else %}Create Project{% endif %}</h1>
 {% endblock %}
 
 {% block content %}
 <section class="project-form-intro" aria-labelledby="project-form-heading">
-    <h2 id="project-form-heading">Set up a project</h2>
-    <p>Enter the project details below. Projects start as Planned or Active.</p>
+    <h2 id="project-form-heading">{% if is_update %}Update project details{% else %}Set up a project{% endif %}</h2>
+    <p>
+        {% if is_update %}
+        Update the details for {{ project.name }}.
+        {% else %}
+        Enter the project details below. Projects start as Planned or Active.
+        {% endif %}
+    </p>
 </section>
 
 <form class="card project-form" method="post">
@@ -93,13 +99,9 @@
             name="status"
             aria-describedby="project-status-help{% if form.status.errors %} project-status-errors{% endif %}"
             {% if form.status.errors %}aria-invalid="true"{% endif %}
-            {% if not project_status_choices %}disabled{% endif %}
         >
-            <option value="">Select a status</option>
             {% for value, label in project_status_choices %}
             <option value="{{ value }}"{% if form.status.value == value %} selected{% endif %}>{{ label }}</option>
-            {% empty %}
-            <option value="" selected>Status options await team agreement</option>
             {% endfor %}
         </select>
         <small class="field-help" id="project-status-help">New projects may start as Planned or Active.</small>
@@ -109,8 +111,12 @@
     </div>
 
     <div class="project-form-actions">
-        <button type="submit">Create Project</button>
+        <button type="submit">{% if is_update %}Save changes{% else %}Create Project{% endif %}</button>
+        {% if is_update %}
+        <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">Cancel</a>
+        {% else %}
         <a class="button button-secondary" href="{% url 'projects:project-list' %}">Cancel</a>
+        {% endif %}
     </div>
 </form>
 {% endblock %}
