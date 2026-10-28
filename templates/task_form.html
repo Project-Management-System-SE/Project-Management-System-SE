@@ -13,7 +13,7 @@
     {% if form_intro %}<p>{{ form_intro }}</p>{% endif %}
 </section>
 
-<form class="card project-form task-form" method="post"{% if form_action %} action="{{ form_action }}"{% endif %} aria-labelledby="task-form-heading">
+<form class="card project-form task-form" method="post"{% if form_action %} action="{{ form_action }}"{% endif %}{% if form.is_multipart %} enctype="multipart/form-data"{% endif %} aria-labelledby="task-form-heading">
     {% csrf_token %}
 
     {% if save_error %}
@@ -32,7 +32,7 @@
 
     {% for field in form.visible_fields %}
     <div class="form-field">
-        <label{% if field.id_for_label %} for="{{ field.id_for_label }}"{% endif %}>{{ field.label|default:field.name }}{% if field.field.required %} <span aria-hidden="true">*</span>{% endif %}</label>
+        <label{% if field.id_for_label %} for="{{ field.id_for_label }}"{% endif %}>{{ field.label|default:field.name }}{% if field.field.required %} <span aria-hidden="true">*</span><span class="visually-hidden"> (required)</span>{% endif %}</label>
         {{ field|accessible_widget }}
         {% if field.help_text %}
         <small class="field-help"{% if field.auto_id %} id="{{ field.auto_id }}_help"{% endif %}>{{ field.help_text }}</small>
