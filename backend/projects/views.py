@@ -1,12 +1,26 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
-from django.shortcuts import redirect, render
+from django.db import IntegrityError, transaction
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ProjectForm
+from .forms import ProjectForm, ProjectMemberForm, ProjectUpdateForm
 from .models import Project, ProjectMembership
-from .permissions import can_create_project, visible_projects_for
+from .permissions import (
+    can_create_project,
+    can_manage_project,
+    ensure_project_owner_membership,
+    manageable_project_ids_for,
+    visible_projects_for,
+)
+
+
+def _manageable_project_or_403(user, project_id):
+    project = get_object_or_404(Project, pk=project_id)
+    if not can_manage_project(user, project):
+        raise PermissionDenied
+    return project
 
 
 @login_required
@@ -30,6 +44,7 @@ def project_list(request):
     context = {
         "projects": projects,
         "can_create_project": can_create_project(request.user),
+        "manageable_project_ids": manageable_project_ids_for(request.user, projects),
     }
     return render(request, "projects.html", context)
 
@@ -63,3 +78,137 @@ def project_create(request):
         "project_status_choices": form.fields["status"].choices,
     }
     return render(request, "project_form.html", context)
+
+
+@login_required
+def project_detail(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    can_manage = can_manage_project(request.user, project)
+    memberships = project.memberships.select_related("user")
+    member_form = (
+        ProjectMemberForm(project=project, actor=request.user)
+        if can_manage
+        else None
+    )
+    context = {
+        "project": project,
+        "memberships": memberships,
+        "can_manage_project": can_manage,
+        "member_form": member_form,
+    }
+    return render(request, "project_detail.html", context)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def project_update(request, project_id):
+    project = _manageable_project_or_403(request.user, project_id)
+
+    if request.method == "POST":
+        form = ProjectUpdateForm(request.POST, instance=project)
+        if form.is_valid():
+            with transaction.atomic():
+                form.save()
+                ensure_project_owner_membership(project)
+            messages.success(request, "Project details updated successfully.")
+            return redirect("projects:project-detail", project_id=project.pk)
+    else:
+        form = ProjectUpdateForm(instance=project)
+
+    context = {
+        "form": form,
+        "project_status_choices": form.fields["status"].choices,
+        "project": project,
+        "is_update": True,
+    }
+    return render(request, "project_form.html", context)
+
+
+@login_required
+@require_POST
+def project_add_member(request, project_id):
+    project = _manageable_project_or_403(request.user, project_id)
+    form = ProjectMemberForm(
+        request.POST,
+        project=project,
+        actor=request.user,
+    )
+
+    if form.is_valid():
+        try:
+            with transaction.atomic():
+                ensure_project_owner_membership(project)
+                ProjectMembership.objects.create(
+                    project=project,
+                    user=form.cleaned_data["user"],
+                    project_role=form.cleaned_data["project_role"],
+                )
+        except IntegrityError:
+            form.add_error("user", "This user is already a project member.")
+        else:
+            messages.success(request, "Project member added successfully.")
+            return redirect("projects:project-detail", project_id=project.pk)
+
+    return render(
+        request,
+        "project_detail.html",
+        {
+            "project": project,
+            "memberships": project.memberships.select_related("user"),
+            "can_manage_project": True,
+            "member_form": form,
+        },
+    )
+
+
+@login_required
+@require_POST
+def project_remove_member(request, project_id, membership_id):
+    project = _manageable_project_or_403(request.user, project_id)
+    membership = get_object_or_404(
+        ProjectMembership,
+        pk=membership_id,
+        project=project,
+    )
+
+    if membership.user_id == project.owner_id:
+        messages.error(request, "The project owner's Project Manager membership cannot be removed.")
+        return redirect("projects:project-detail", project_id=project.pk)
+
+    if (
+        not request.user.is_admin
+        and membership.project_role != ProjectMembership.Role.TEAM_MEMBER
+    ):
+        raise PermissionDenied
+
+    with transaction.atomic():
+        ensure_project_owner_membership(project)
+        membership.delete()
+
+    messages.success(request, "Project member removed successfully.")
+    return redirect("projects:project-detail", project_id=project.pk)
+
+
+@login_required
+@require_POST
+def project_archive(request, project_id):
+    project = _manageable_project_or_403(request.user, project_id)
+    if project.status != Project.Status.ARCHIVED:
+        project.status = Project.Status.ARCHIVED
+        project.save(update_fields=["status", "updated_at"])
+    messages.success(request, "Project archived successfully.")
+    return redirect("projects:project-detail", project_id=project.pk)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def project_delete(request, project_id):
+    project = _manageable_project_or_403(request.user, project_id)
+
+    if request.method == "POST":
+        project_name = project.name
+        project.delete()
+        messages.success(request, f"{project_name} was deleted.")
+        return redirect("projects:project-list")
+
+    return render(request, "project_confirm_delete.html", {"project": project})

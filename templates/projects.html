@@ -46,6 +46,14 @@
                     Not set
                 {% endif %}
             </p>
+            <div class="project-form-actions">
+                <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">
+                    View project
+                </a>
+                {% if project.pk in manageable_project_ids %}
+                <a class="button" href="{% url 'projects:project-update' project.pk %}">Edit project</a>
+                {% endif %}
+            </div>
         </li>
         {% endfor %}
     </ul>

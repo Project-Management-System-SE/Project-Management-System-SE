@@ -1,6 +1,8 @@
 from django import forms
 
-from .models import Project
+from accounts.models import User
+
+from .models import Project, ProjectMembership
 
 
 class ProjectForm(forms.ModelForm):
@@ -35,3 +37,43 @@ class ProjectForm(forms.ModelForm):
             )
 
         return cleaned_data
+
+
+class ProjectUpdateForm(ProjectForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["status"].choices = Project.Status.choices
+
+
+class ProjectMemberForm(forms.Form):
+    user = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        label="Team member",
+        empty_label="Select a user",
+    )
+    project_role = forms.ChoiceField(
+        choices=ProjectMembership.Role.choices,
+        label="Project role",
+    )
+
+    def __init__(self, *args, project, actor, **kwargs):
+        super().__init__(*args, **kwargs)
+        existing_member_ids = ProjectMembership.objects.filter(
+            project=project
+        ).values_list("user_id", flat=True)
+        self.fields["user"].queryset = (
+            User.objects.filter(
+                is_active=True,
+                is_staff=False,
+                is_superuser=False,
+            )
+            .exclude(pk__in=existing_member_ids)
+            .exclude(pk=project.owner_id)
+            .order_by("full_name", "email")
+        )
+
+        if not actor.is_admin:
+            self.fields["project_role"].choices = [
+                (ProjectMembership.Role.TEAM_MEMBER, "Team Member")
+            ]
+            self.fields["project_role"].initial = ProjectMembership.Role.TEAM_MEMBER
