@@ -82,3 +82,13 @@ source venv/bin/activate
 ```bash
 pip install -r backend/requirements.txt
 ```
+
+### Project management
+
+Open **Projects** and select **View project** to see project details and membership. Project
+Admins and that project's Project Managers can edit, archive, and delete it. Project Managers may
+add or remove active, non-admin users as Team Members; only Admins can grant or remove a
+Project Manager role. A project's owner remains a Project Manager and cannot be removed from its
+own membership. Deletion requires confirmation and removes the project and its memberships, not
+the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
+requests.

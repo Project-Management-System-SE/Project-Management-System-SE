@@ -71,6 +71,9 @@
                 {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
             </p>
             {% if project.description %}<p>{{ project.description }}</p>{% endif %}
+            <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">
+                View project
+            </a>
         </li>
         {% endfor %}
     </ul>
