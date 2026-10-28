@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Create account | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Create account</h1>
+{% endblock %}
+
+{% block content %}
+<section class="project-form-intro" aria-labelledby="register-heading">
+    <h2 id="register-heading">Join your workspace</h2>
+    <p>Create an account with your name, email address, and password.</p>
+</section>
+
+<form class="card project-form" method="post">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    {% for field in form %}
+    <div class="form-field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}
+        <div class="field-help">{{ field.help_text }}</div>
+        {% endif %}
+        {% if field.errors %}
+        <div class="field-errors" role="alert">{{ field.errors }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <div class="project-form-actions">
+        <button type="submit">Create account</button>
+    </div>
+    <p>Already registered? <a href="{% url 'login' %}">Log in</a>.</p>
+</form>
+{% endblock %}

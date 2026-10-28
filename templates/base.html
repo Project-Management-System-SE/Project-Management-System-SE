@@ -43,6 +43,7 @@
                     </form>
                     {% else %}
                     <a class="button" href="{% url 'login' %}">Log in</a>
+                    <a class="button button-secondary" href="{% url 'register' %}">Create account</a>
                     {% endif %}
                     {% block header_actions %}{% endblock %}
                 </div>
