@@ -9,6 +9,10 @@ def accessible_widget(field):
     attrs = {}
     described_by = []
 
+    existing_described_by = field.field.widget.attrs.get("aria-describedby")
+    if existing_described_by:
+        described_by.append(existing_described_by)
+
     if field.auto_id:
         if field.help_text:
             described_by.append(f"{field.auto_id}_help")

@@ -152,3 +152,119 @@ class TaskFormTemplateTests(SimpleTestCase):
         html = self.render_form(empty_form)
 
         self.assertIn("No task fields are available yet.", html)
+
+    def test_invalid_priority_status_and_assignee_display_field_errors(self):
+        form = TaskFormStub(
+            data={
+                "title": "A valid title",
+                "description": "Some description",
+                "priority": "NONEXISTENT_PRIORITY",
+                "due_date": "2026-11-01",
+                "assignee": "999",
+                "status": "NONEXISTENT_STATUS",
+                "labels": "backend",
+            }
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("priority", form.errors)
+        self.assertIn("assignee", form.errors)
+        self.assertIn("status", form.errors)
+
+        html = self.render_form(
+            form,
+            form_heading="Create task",
+            submit_label="Create task",
+        )
+
+        # Field error elements must exist beside their fields
+        self.assertIn('id="id_priority_errors"', html)
+        self.assertIn('id="id_assignee_errors"', html)
+        self.assertIn('id="id_status_errors"', html)
+
+        # Elements should be marked with role="alert"
+        self.assertIn('class="field-errors"', html)
+
+        # Select inputs should have aria-invalid and aria-describedby referencing their error IDs
+        self.assertIn('name="priority"', html)
+        self.assertIn('aria-invalid="true"', html)
+        self.assertIn('aria-describedby="id_priority_errors"', html)
+        self.assertIn('aria-describedby="id_assignee_errors"', html)
+        self.assertIn('aria-describedby="id_status_errors"', html)
+
+    def test_preserves_entered_values_on_validation_failure(self):
+        # When validation fails (e.g., missing required title), valid fields that
+        # the user entered must retain their entered values.
+        form = TaskFormStub(
+            data={
+                "title": "",  # missing required title
+                "description": "Retained description text",
+                "priority": "HIGH",
+                "due_date": "2026-12-25",
+                "assignee": "1",
+                "status": "TODO",
+                "labels": "retained-tag, high-priority",
+            }
+        )
+        self.assertFalse(form.is_valid())
+
+        html = self.render_form(form)
+
+        # Field errors appear for title
+        self.assertIn('id="id_title_errors"', html)
+        self.assertIn("This field is required.", html)
+
+        # Previously entered values are preserved in form fields
+        self.assertIn("Retained description text", html)
+        self.assertIn('value="HIGH" selected', html)
+        self.assertIn('value="2026-12-25"', html)
+        self.assertIn('value="1" selected', html)
+        self.assertIn('value="TODO" selected', html)
+        self.assertIn('value="retained-tag, high-priority"', html)
+
+    def test_hidden_fields_render_inside_form(self):
+        class FormWithHiddenField(TaskFormStub):
+            project_id = forms.CharField(
+                widget=forms.HiddenInput,
+                initial="42",
+            )
+
+        form = FormWithHiddenField()
+        html = self.render_form(form)
+
+        self.assertIn('type="hidden" name="project_id" value="42"', html)
+
+    def test_custom_page_heading_form_intro_and_action(self):
+        form = TaskFormStub()
+        html = self.render_form(
+            form,
+            page_heading="Create Sprint Task",
+            form_heading="Sprint Task Details",
+            form_intro="Assign this task to a sprint teammate.",
+            form_action="/projects/1/tasks/new/",
+        )
+
+        self.assertIn("<title>Create Sprint Task | PMS</title>", html)
+        self.assertIn("<h1>Create Sprint Task</h1>", html)
+        self.assertIn("Sprint Task Details", html)
+        self.assertIn("Assign this task to a sprint teammate.", html)
+        self.assertIn('action="/projects/1/tasks/new/"', html)
+
+    def test_accessible_widget_preserves_existing_aria_describedby(self):
+        class FormWithCustomDescribedBy(forms.Form):
+            notes = forms.CharField(
+                help_text="Some helpful text.",
+                widget=forms.TextInput(
+                    attrs={"aria-describedby": "external-guidelines"}
+                ),
+            )
+
+        form = FormWithCustomDescribedBy(data={"notes": ""})
+        self.assertFalse(form.is_valid())
+
+        html = self.render_form(form)
+
+        # Should combine existing describedby with the generated help and error IDs
+        self.assertIn(
+            'aria-describedby="external-guidelines id_notes_help id_notes_errors"',
+            html,
+        )
