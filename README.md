@@ -105,10 +105,26 @@ environment variables: `DJANGO_EMAIL_BACKEND`, `DJANGO_EMAIL_HOST`, `DJANGO_EMAI
 
 ### 5. Run the application
 
+The development entry point enables Django debug mode by default, so `runserver`
+serves the files in the repository's `static/` directory:
+
+```powershell
+# Windows PowerShell
+python manage.py runserver
+```
+
+```bash
+# Linux / macOS
+python manage.py runserver
+```
+
 ```bash
 python backend/manage.py migrate
 python backend/manage.py runserver
 ```
+
+To explicitly disable debug mode, set `DJANGO_DEBUG=false` and provide a
+`DJANGO_SECRET_KEY`.
 
 ### Project management
 
