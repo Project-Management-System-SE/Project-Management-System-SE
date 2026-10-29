@@ -46,6 +46,9 @@
                     Not set
                 {% endif %}
             </p>
+            <a class="button button-secondary" href="{% url 'tasks:project-task-list' project.pk %}">
+                View tasks
+            </a>
         </li>
         {% endfor %}
     </ul>
