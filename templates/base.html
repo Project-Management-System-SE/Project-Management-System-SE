@@ -22,7 +22,7 @@
                 <ul>
                     <li><a class="navigation-item" href="{% url 'projects:dashboard' %}">Dashboard</a></li>
                     <li><a class="navigation-item" href="{% url 'projects:project-list' %}">Projects</a></li>
-                    <li><a class="navigation-item" href="{% url 'tasks:task-list' %}">Tasks</a></li>
+                    <li><a class="navigation-item" href="{% url 'tasks:all-task-list' %}">Tasks</a></li>
                 </ul>
             </nav>
         </aside>
@@ -43,6 +43,7 @@
                     </form>
                     {% else %}
                     <a class="button" href="{% url 'login' %}">Log in</a>
+                    <a class="button button-secondary" href="{% url 'register' %}">Create account</a>
                     {% endif %}
                     {% block header_actions %}{% endblock %}
                 </div>

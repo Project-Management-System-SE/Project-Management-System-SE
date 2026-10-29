@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ task.title }} | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>{{ task.title }}</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="task-detail-heading">
+    <div>
+        <h2 id="task-detail-heading">Task details</h2>
+        <p>Project: <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></p>
+    </div>
+    <div class="project-form-actions">
+        {% if can_edit_task %}
+        <a class="button" href="{% url 'tasks:task-update' project.pk task.pk %}">Edit task</a>
+        {% endif %}
+        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}">Back to task list</a>
+    </div>
+</section>
+
+<article class="card">
+    <div class="task-detail-meta" style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap;">
+        <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
+            {{ task.get_status_display }}
+        </span>
+        <span class="status {% if task.priority == 'CRITICAL' or task.priority == 'HIGH' %}status-danger{% elif task.priority == 'MEDIUM' %}status-warning{% else %}status-neutral{% endif %}">
+            {{ task.get_priority_display }} Priority
+        </span>
+    </div>
+
+    <h3>Description</h3>
+    <p>{{ task.description|default:"No description provided."|linebreaksbr }}</p>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+        <div>
+            <strong>Assignee:</strong>
+            <p>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</p>
+        </div>
+        <div>
+            <strong>Due date:</strong>
+            <p>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
+            <strong>Created by:</strong>
+            <p>{{ task.created_by.full_name|default:task.created_by.email }}</p>
+        </div>
+        <div>
+            <strong>Created:</strong>
+            <p>{{ task.created_at|date:"M j, Y H:i" }}</p>
+        </div>
+    </div>
+
+    <div style="margin-top: 1.5rem;">
+        <strong>Labels:</strong>
+        <div class="task-labels-list">
+            {% for label in task.labels.all %}
+            <span class="task-label">{{ label.name }}</span>
+            {% empty %}
+            <span style="color: var(--color-muted);">No labels assigned.</span>
+            {% endfor %}
+        </div>
+    </div>
+</article>
+
+{% if can_update_status %}
+<section class="card project-form" aria-labelledby="update-task-status-heading">
+    <h2 id="update-task-status-heading">Update status</h2>
+    <form method="post" action="{% url 'tasks:task-update-status' project.pk task.pk %}">
+        {% csrf_token %}
+        <div class="form-field">
+            <label for="{{ status_form.status.id_for_label }}">Status</label>
+            {{ status_form.status }}
+            {% if status_form.status.errors %}
+            <div class="field-errors" role="alert">{{ status_form.status.errors }}</div>
+            {% endif %}
+        </div>
+        <div class="project-form-actions">
+            <button type="submit">Save status</button>
+        </div>
+    </form>
+</section>
+{% endif %}
+{% endblock %}

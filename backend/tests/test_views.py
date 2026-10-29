@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from accounts.models import User
 from projects.models import Project, ProjectMembership
+from tasks.models import Task
 
 
 def create_user(email, username, full_name):
@@ -53,7 +54,26 @@ class DashboardViewTests(TestCase):
             user=self.owner,
             project_role=ProjectMembership.Role.PROJECT_MANAGER,
         )
-        Project.objects.create(name="Planned project", owner=self.owner)
+        planned_project = Project.objects.create(name="Planned project", owner=self.owner)
+        Task.objects.create(
+            project=active_project,
+            title="Done task",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+            assignee=self.owner,
+        )
+        Task.objects.create(
+            project=active_project,
+            title="Todo task",
+            created_by=self.owner,
+            assignee=self.owner,
+        )
+        Task.objects.create(
+            project=active_project,
+            title="Unassigned task",
+            created_by=self.owner,
+            status=Task.Status.IN_PROGRESS,
+        )
 
         self.client.force_login(self.owner)
         response = self.client.get(reverse("projects:dashboard"))
@@ -61,17 +81,37 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["total_projects"], 2)
         self.assertEqual(response.context["active_projects"], 1)
-        self.assertIsNone(response.context["my_tasks"])
-        self.assertIsNone(response.context["completed_tasks"])
+        self.assertEqual(response.context["total_tasks"], 3)
+        self.assertEqual(response.context["my_tasks"], 2)
+        self.assertEqual(response.context["completed_tasks"], 1)
         self.assertEqual(len(response.context["projects"]), 2)
+        active_summary = next(
+            project for project in response.context["projects"] if project == active_project
+        )
+        self.assertEqual(active_summary.total_task_count, 3)
+        self.assertEqual(active_summary.completed_task_count, 1)
+        self.assertEqual(active_summary.completion_percentage, 33)
+        self.assertEqual(
+            [status["count"] for status in active_summary.status_breakdown],
+            [1, 1, 1],
+        )
+        planned_summary = next(
+            project for project in response.context["projects"] if project == planned_project
+        )
+        self.assertEqual(planned_summary.total_task_count, 0)
+        self.assertEqual(planned_summary.completion_percentage, 0)
+        self.assertEqual(
+            response.context["unassigned_task_count"],
+            1,
+        )
         self.assertContains(response, 'href="/static/css/style.css"')
         self.assertContains(response, "Active project")
         self.assertContains(response, "Active project description")
         self.assertContains(response, "Active")
         self.assertContains(response, "Nov 1, 2026")
         self.assertContains(response, "Planned project")
-        self.assertContains(response, "Progress unavailable")
-        self.assertContains(response, "Task data unavailable")
+        self.assertContains(response, "33%")
+        self.assertContains(response, "Unassigned")
         self.assertContains(response, 'href="/projects/new/"')
 
     def test_dashboard_renders_empty_state_for_project_manager(self):
@@ -83,7 +123,7 @@ class DashboardViewTests(TestCase):
         self.assertContains(response, "No projects to show yet")
         self.assertContains(response, "Create your first project")
 
-    def test_dashboard_limits_recent_projects_to_five(self):
+    def test_dashboard_includes_all_visible_projects(self):
         for index in range(6):
             Project.objects.create(name=f"Project {index}", owner=self.owner)
 
@@ -91,7 +131,62 @@ class DashboardViewTests(TestCase):
         response = self.client.get(reverse("projects:dashboard"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.context["projects"]), 5)
+        self.assertEqual(len(response.context["projects"]), 6)
+
+    def test_dashboard_updates_after_task_status_and_assignee_changes(self):
+        project = Project.objects.create(name="Metrics project", owner=self.owner)
+        member = create_user("member@example.com", "member", "Team Member")
+        ProjectMembership.objects.create(
+            project=project,
+            user=member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        task = Task.objects.create(
+            project=project,
+            title="Changing task",
+            created_by=self.owner,
+            assignee=self.owner,
+        )
+        self.client.force_login(self.owner)
+
+        initial = self.client.get(reverse("projects:dashboard"))
+        project_summary = initial.context["projects"][0]
+        self.assertEqual(project_summary.completion_percentage, 0)
+        self.assertEqual(initial.context["my_tasks"], 1)
+
+        task.status = Task.Status.DONE
+        task.assignee = member
+        task.save()
+
+        updated = self.client.get(reverse("projects:dashboard"))
+        project_summary = updated.context["projects"][0]
+        self.assertEqual(project_summary.completion_percentage, 100)
+        self.assertEqual(updated.context["my_tasks"], 0)
+        self.assertEqual(
+            updated.context["assignee_distribution"][0]["task_count"],
+            1,
+        )
+
+    def test_dashboard_excludes_tasks_from_hidden_projects(self):
+        visible_project = Project.objects.create(name="Visible", owner=self.owner)
+        hidden_owner = create_user("hidden@example.com", "hidden", "Hidden Owner")
+        hidden_project = Project.objects.create(name="Hidden", owner=hidden_owner)
+        Task.objects.create(
+            project=visible_project,
+            title="Visible task",
+            created_by=self.owner,
+        )
+        Task.objects.create(
+            project=hidden_project,
+            title="Hidden task",
+            created_by=hidden_owner,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:dashboard"))
+
+        self.assertEqual(response.context["total_tasks"], 1)
+        self.assertNotContains(response, "Hidden")
 
     def test_dashboard_alias_renders(self):
         self.client.force_login(self.owner)
@@ -521,9 +616,58 @@ class ProjectCreateTransactionTests(TestCase):
 
 
 class LoginViewTests(TestCase):
+    def setUp(self):
+        self.email = "login@example.com"
+        self.password = "safe-password-123"
+        self.user = User.objects.create_user(
+            email=self.email,
+            username="login-user",
+            full_name="Login User",
+            password=self.password,
+        )
+
     def test_login_page_renders(self):
         response = self.client.get(reverse("login"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="username"')
         self.assertContains(response, 'name="password"')
+
+    def test_login_with_email_creates_authenticated_session(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": self.password},
+        )
+
+        self.assertRedirects(response, reverse("projects:dashboard"))
+        self.assertIn("sessionid", response.cookies)
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.user.pk))
+
+        dashboard_response = self.client.get(reverse("projects:dashboard"))
+        self.assertTrue(dashboard_response.wsgi_request.user.is_authenticated)
+
+    def test_login_rejects_invalid_password(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": "incorrect-password"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please enter a correct email and password.")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_logout_ends_authenticated_session(self):
+        self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": self.password},
+        )
+
+        response = self.client.post(reverse("logout"))
+
+        self.assertRedirects(response, reverse("login"))
+        self.assertNotIn("_auth_user_id", self.client.session)
+        dashboard_response = self.client.get(reverse("projects:dashboard"))
+        self.assertRedirects(
+            dashboard_response,
+            f"{reverse('login')}?next={reverse('projects:dashboard')}",
+        )
