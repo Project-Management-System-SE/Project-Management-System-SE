@@ -1,6 +1,5 @@
 from django import forms
 from django.contrib.auth import get_user_model
-from django.db import transaction
 from django.db.models import Q
 
 from .models import Task, TaskLabel
@@ -60,7 +59,7 @@ class TaskForm(forms.ModelForm):
         if not raw_labels:
             return []
 
-        tokens = [t.strip().lower() for t in raw_labels.split(",")]
+        tokens = [token.strip().lower() for token in raw_labels.split(",")]
         cleaned_tokens = []
         seen = set()
 
@@ -76,9 +75,7 @@ class TaskForm(forms.ModelForm):
                 cleaned_tokens.append(token)
 
         if len(cleaned_tokens) > 10:
-            raise forms.ValidationError(
-                "A task cannot have more than 10 labels."
-            )
+            raise forms.ValidationError("A task cannot have more than 10 labels.")
 
         return cleaned_tokens
 
@@ -102,24 +99,21 @@ class TaskForm(forms.ModelForm):
         if self.project and not getattr(task, "project_id", None):
             task.project = self.project
 
-        def save_m2m():
-            self._save_labels(task)
-
         if commit:
             task.save()
-            save_m2m()
+            self._save_labels(task)
         else:
-            self.save_m2m = save_m2m
-
+            self.save_m2m = lambda: self._save_labels(task)
         return task
 
     def _save_labels(self, task):
         cleaned_labels = self.cleaned_data.get("labels", [])
-        label_objs = []
-        for name in cleaned_labels:
-            label_obj, _ = TaskLabel.objects.get_or_create(
-                project=task.project,
-                name=name,
-            )
-            label_objs.append(label_obj)
-        task.labels.set(label_objs)
+        label_objects = [
+            TaskLabel.objects.get_or_create(project=task.project, name=name)[0]
+            for name in cleaned_labels
+        ]
+        task.labels.set(label_objects)
+
+
+class TaskStatusForm(forms.Form):
+    status = forms.ChoiceField(choices=Task.Status.choices)

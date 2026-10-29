@@ -63,4 +63,23 @@
         </div>
     </div>
 </article>
+
+{% if can_update_status %}
+<section class="card project-form" aria-labelledby="update-task-status-heading">
+    <h2 id="update-task-status-heading">Update status</h2>
+    <form method="post" action="{% url 'tasks:task-update-status' project.pk task.pk %}">
+        {% csrf_token %}
+        <div class="form-field">
+            <label for="{{ status_form.status.id_for_label }}">Status</label>
+            {{ status_form.status }}
+            {% if status_form.status.errors %}
+            <div class="field-errors" role="alert">{{ status_form.status.errors }}</div>
+            {% endif %}
+        </div>
+        <div class="project-form-actions">
+            <button type="submit">Save status</button>
+        </div>
+    </form>
+</section>
+{% endif %}
 {% endblock %}

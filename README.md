@@ -148,3 +148,14 @@ Project Manager role. A project's owner remains a Project Manager and cannot be 
 own membership. Deletion requires confirmation and removes the project and its memberships, not
 the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
 requests.
+
+### Task viewing and status updates
+
+Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
+tasks in projects they can access. Project Admins and Project Managers can update any task
+status; an authorized project member can update a task assigned to them or created by them.
+Supported statuses are **To Do**, **In Progress**, and **Done**. Task details also support
+creation, editing, and project-scoped labels.
+
+Invalid status values are rejected without changing the saved task. Run
+`python backend/manage.py migrate` after pulling changes to apply database migrations.

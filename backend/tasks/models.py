@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 
 class TaskLabel(models.Model):
@@ -36,16 +37,16 @@ class TaskLabel(models.Model):
 
 
 class Task(models.Model):
+    class Status(models.TextChoices):
+        TODO = "TODO", "To Do"
+        IN_PROGRESS = "IN_PROGRESS", "In Progress"
+        DONE = "DONE", "Done"
+
     class Priority(models.TextChoices):
         LOW = "LOW", "Low"
         MEDIUM = "MEDIUM", "Medium"
         HIGH = "HIGH", "High"
         CRITICAL = "CRITICAL", "Critical"
-
-    class Status(models.TextChoices):
-        TODO = "TODO", "To Do"
-        IN_PROGRESS = "IN_PROGRESS", "In Progress"
-        DONE = "DONE", "Done"
 
     project = models.ForeignKey(
         "projects.Project",
@@ -106,8 +107,6 @@ class Task(models.Model):
     def save(self, *args, **kwargs):
         if self.title:
             self.title = self.title.strip()
-        from django.utils import timezone
-
         if self.status == self.Status.DONE and not self.completed_at:
             self.completed_at = timezone.now()
         elif self.status != self.Status.DONE and self.completed_at:
