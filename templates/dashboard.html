@@ -33,16 +33,20 @@
         </p>
     </article>
     <article class="card dashboard-summary-card">
+        <h2 class="summary-label">Total Tasks</h2>
+        <p class="summary-value">
+            {{ total_tasks }}
+        </p>
+    </article>
+    <article class="card dashboard-summary-card">
         <h2 class="summary-label">My Tasks</h2>
         <p class="summary-value">
-            <span aria-label="Task data unavailable">—</span>
+            {{ my_tasks }}
         </p>
     </article>
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">Completed Tasks</h2>
-        <p class="summary-value">
-            <span aria-label="Task data unavailable">—</span>
-        </p>
+        <p class="summary-value">{{ completed_tasks }}</p>
     </article>
 </section>
 
@@ -62,9 +66,20 @@
                 <h3>{{ project.name }}</h3>
                 <span class="status status-neutral">{{ project.get_status_display|default:"Status unavailable" }}</span>
             </div>
-            <div class="project-progress">
+            <div class="project-progress" aria-label="{{ project.completion_percentage }} percent complete">
                 <span>Progress</span>
-                <span class="progress-unavailable" aria-label="Progress unavailable">—</span>
+                <progress value="{{ project.completion_percentage }}" max="100">
+                    {{ project.completion_percentage }}%
+                </progress>
+                <strong>{{ project.completion_percentage }}%</strong>
+            </div>
+            <div class="project-task-summary">
+                <strong>{{ project.total_task_count }} task{{ project.total_task_count|pluralize }}</strong>
+                <ul class="status-breakdown" aria-label="Task status breakdown">
+                    {% for status in project.status_breakdown %}
+                    <li><span>{{ status.label }}</span><strong>{{ status.count }}</strong></li>
+                    {% endfor %}
+                </ul>
             </div>
             <p class="project-due-date">
                 <span class="project-detail-label">Due date:</span>
@@ -86,6 +101,44 @@
             <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
         </div>
         {% endif %}
+    </div>
+    {% endif %}
+</section>
+
+<section class="dashboard-distribution" aria-labelledby="assignee-heading">
+    <div class="dashboard-section-heading">
+        <div>
+            <h2 id="assignee-heading">Task Distribution by Assignee</h2>
+            <p>See how visible project work is distributed across team members.</p>
+        </div>
+    </div>
+    {% if assignee_distribution %}
+    <div class="card assignee-table-wrapper">
+        <table class="assignee-table">
+            <caption class="visually-hidden">Task counts by assignee</caption>
+            <thead>
+                <tr><th scope="col">Assignee</th><th scope="col">Tasks</th></tr>
+            </thead>
+            <tbody>
+                {% for assignee in assignee_distribution %}
+                <tr>
+                    <th scope="row">
+                        {% if assignee.assignee_id %}
+                            {{ assignee.assignee__full_name|default:assignee.assignee__email }}
+                        {% else %}
+                            Unassigned
+                        {% endif %}
+                    </th>
+                    <td>{{ assignee.task_count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card dashboard-empty-state">
+        <h3>No tasks to distribute</h3>
+        <p>Task assignments will appear here once tasks are created.</p>
     </div>
     {% endif %}
 </section>

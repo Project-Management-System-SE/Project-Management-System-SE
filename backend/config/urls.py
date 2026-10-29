@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 
 from accounts import views as account_views
@@ -32,3 +34,6 @@ urlpatterns = [
     path("", include("projects.urls")),
     path("", include("tasks.urls")),
 ]
+
+if settings.DEBUG:
+    urlpatterns += staticfiles_urlpatterns()

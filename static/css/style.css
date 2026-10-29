@@ -456,6 +456,66 @@ textarea::placeholder {
     color: var(--color-muted);
 }
 
+.project-task-summary {
+    min-width: 0;
+}
+
+.project-task-summary > strong {
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.status-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem 0.75rem;
+    margin: 0;
+    padding: 0;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    list-style: none;
+}
+
+.status-breakdown li {
+    display: flex;
+    gap: 0.25rem;
+}
+
+.status-breakdown strong {
+    color: var(--color-text);
+}
+
+.dashboard-distribution {
+    margin-top: 2rem;
+}
+
+.assignee-table-wrapper {
+    overflow-x: auto;
+}
+
+.assignee-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.assignee-table th,
+.assignee-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+}
+
+.assignee-table thead th {
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+}
+
+.assignee-table tbody tr:last-child th,
+.assignee-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
 .project-due-date {
     margin: 0;
     color: var(--color-muted);

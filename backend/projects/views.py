@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -14,6 +15,7 @@ from .permissions import (
     manageable_project_ids_for,
     visible_projects_for,
 )
+from tasks.models import Task
 
 
 def _manageable_project_or_403(user, project_id):
@@ -25,14 +27,73 @@ def _manageable_project_or_403(user, project_id):
 
 @login_required
 def dashboard(request):
-    projects = visible_projects_for(request.user)
+    visible_projects = visible_projects_for(request.user)
+    status_counts = {
+        status_value: Count(
+            "tasks",
+            filter=Q(tasks__status=status_value),
+        )
+        for status_value, _ in Task.Status.choices
+    }
+    projects = list(
+        visible_projects.annotate(
+            total_task_count=Count("tasks", distinct=True),
+            **{
+                f"{status_value.lower()}_task_count": count
+                for status_value, count in status_counts.items()
+            },
+        )
+    )
+
+    for project in projects:
+        project.status_breakdown = [
+            {
+                "value": status_value,
+                "label": status_label,
+                "count": getattr(project, f"{status_value.lower()}_task_count"),
+            }
+            for status_value, status_label in Task.Status.choices
+        ]
+        project.completed_task_count = getattr(
+            project,
+            f"{Task.Status.DONE.lower()}_task_count",
+        )
+        project.completion_percentage = (
+            round(project.completed_task_count * 100 / project.total_task_count)
+            if project.total_task_count
+            else 0
+        )
+
+    visible_tasks = Task.objects.filter(project__in=visible_projects)
+    assignee_distribution = list(
+        visible_tasks.filter(assignee__isnull=False)
+        .values("assignee_id", "assignee__full_name", "assignee__email")
+        .annotate(task_count=Count("id"))
+        .order_by("assignee__full_name", "assignee__email")
+    )
+    unassigned_task_count = visible_tasks.filter(assignee__isnull=True).count()
+    if unassigned_task_count:
+        assignee_distribution.append(
+            {
+                "assignee_id": None,
+                "assignee__full_name": "Unassigned",
+                "assignee__email": "",
+                "task_count": unassigned_task_count,
+            }
+        )
 
     context = {
-        "total_projects": projects.count(),
-        "active_projects": projects.filter(status=Project.Status.ACTIVE).count(),
-        "my_tasks": None,
-        "completed_tasks": None,
-        "projects": projects[:5],
+        "total_projects": len(projects),
+        "active_projects": sum(
+            project.status == Project.Status.ACTIVE for project in projects
+        ),
+        "total_tasks": visible_tasks.count(),
+        "my_tasks": visible_tasks.filter(assignee=request.user).count(),
+        "completed_tasks": visible_tasks.filter(status=Task.Status.DONE).count(),
+        "projects": projects,
+        "task_status_choices": Task.Status.choices,
+        "assignee_distribution": assignee_distribution,
+        "unassigned_task_count": unassigned_task_count,
         "can_create_project": can_create_project(request.user),
     }
     return render(request, "dashboard.html", context)
