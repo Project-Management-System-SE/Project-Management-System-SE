@@ -82,3 +82,15 @@ source venv/bin/activate
 ```bash
 pip install -r backend/requirements.txt
 ```
+
+### Task viewing and status updates
+
+Run database migrations with `python backend/manage.py migrate`, then open **Tasks** in the
+sidebar or select **View tasks** from a project. Project members can view tasks for their
+projects. Project Admins and Project Managers can update any task status; a Team Member can
+update the status of a task assigned to them. The supported statuses are **To Do**,
+**In Progress**, and **Done**.
+
+Tasks can be managed through Django Admin at `/admin/`; the task list and details pages are
+read/update views and do not provide task creation. Invalid status values are rejected and do
+not change the saved task.
