@@ -105,6 +105,19 @@ environment variables: `DJANGO_EMAIL_BACKEND`, `DJANGO_EMAIL_HOST`, `DJANGO_EMAI
 
 ### 5. Run the application
 
+For local development, enable Django's development static-file serving before starting the
+server:
+
+```powershell
+# Windows PowerShell
+$env:DJANGO_DEBUG = "true"
+```
+
+```bash
+# Linux / macOS
+export DJANGO_DEBUG=true
+```
+
 ```bash
 python backend/manage.py migrate
 python backend/manage.py runserver
