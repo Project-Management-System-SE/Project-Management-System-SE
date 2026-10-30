@@ -1,3 +1,4 @@
+from projects.workflow import is_valid_transition, get_allowed_transitions
 import logging
 
 from django.contrib import messages
@@ -386,7 +387,14 @@ def task_update_status(request, project_id, task_id):
     status_form = TaskStatusForm(request.POST)
     if status_form.is_valid():
         previous_status = task.status
-        task.status = status_form.cleaned_data["status"]
+        new_status = status_form.cleaned_data["status"]
+        if not is_valid_transition(task.project, previous_status, new_status):
+            messages.error(
+                request,
+                f"Transition from '{task.get_status_display()}' to '{new_status}' is not permitted by project workflow rules."
+            )
+            return redirect("tasks:task-detail", project_id=project.pk, task_id=task.pk)
+        task.status = new_status
         with transaction.atomic():
             task.save()
             if task.status != previous_status:
