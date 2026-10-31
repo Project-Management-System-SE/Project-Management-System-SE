@@ -72,6 +72,7 @@ def _task_detail_context(
             "created_at", "pk"
         ),
         "comment_form": comment_form if comment_form is not None else TaskCommentForm(),
+        "allowed_transitions": get_allowed_transitions(task.project, task.status),
         "attachment_form": (
             attachment_form
             if attachment_form is not None
