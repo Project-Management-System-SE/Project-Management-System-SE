@@ -85,8 +85,9 @@ pip install -r backend/requirements.txt
 
 ### 4. Configure email for password resets
 
-For local development, use Django's console email backend so reset links are printed in the
-development server output instead of requiring an SMTP account.
+For local development, use Django's console email backend so registration confirmation emails and
+password-reset links are printed in the development server output instead of requiring an SMTP
+account.
 
 ```powershell
 # Windows PowerShell

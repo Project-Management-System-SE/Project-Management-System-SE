@@ -7,12 +7,13 @@
 {% endblock %}
 
 {% block content %}
+<div class="auth-layout">
 <section class="project-form-intro" aria-labelledby="login-heading">
     <h2 id="login-heading">Sign in to your workspace</h2>
     <p>Use the email address and password for your PMS account.</p>
 </section>
 
-<form class="card project-form" method="post">
+<form class="card project-form auth-form" method="post">
     {% csrf_token %}
 
     {% if form.non_field_errors %}
@@ -47,4 +48,5 @@
     <p><a href="{% url 'password_reset' %}">Forgot your password?</a></p>
     <p>New to PMS? <a href="{% url 'register' %}">Create an account</a>.</p>
 </form>
+</div>
 {% endblock %}

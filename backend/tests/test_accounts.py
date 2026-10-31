@@ -1,5 +1,6 @@
 import re
 from urllib.parse import urlsplit
+from unittest.mock import patch
 
 from django.conf import settings
 from django.core import mail
@@ -46,6 +47,7 @@ class RegistrationFormTests(TestCase):
         self.assertIn("email", form.errors)
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class RegistrationViewTests(TestCase):
     def test_registration_creates_a_non_privileged_account(self):
         response = self.client.post(
@@ -69,6 +71,18 @@ class RegistrationViewTests(TestCase):
         self.assertFalse(user.is_superuser)
         self.assertFalse(user.is_admin)
         self.assertFalse(user.groups.exists())
+        self.assertEqual(len(mail.outbox), 1)
+        confirmation_email = mail.outbox[0]
+        self.assertEqual(confirmation_email.to, ["new.member@example.com"])
+        self.assertEqual(confirmation_email.from_email, settings.DEFAULT_FROM_EMAIL)
+        self.assertIn("New Member", confirmation_email.body)
+        self.assertIn("account has been created successfully", confirmation_email.body)
+
+        login_response = self.client.post(
+            reverse("login"),
+            {"username": user.email, "password": "new-safe-password-123!"},
+        )
+        self.assertRedirects(login_response, reverse("projects:dashboard"))
 
     def test_registration_page_renders_required_fields_and_links_from_login(self):
         registration_response = self.client.get(reverse("register"))
@@ -95,6 +109,22 @@ class RegistrationViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.context["form"].errors)
+        self.assertEqual(User.objects.count(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_registration_email_failure_does_not_create_an_account(self):
+        with patch("accounts.views.send_mail", return_value=0):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse("register"),
+                    {
+                        "full_name": "New Member",
+                        "email": "new.member@example.com",
+                        "password1": "new-safe-password-123!",
+                        "password2": "new-safe-password-123!",
+                    },
+                )
+
         self.assertEqual(User.objects.count(), 0)
 
 

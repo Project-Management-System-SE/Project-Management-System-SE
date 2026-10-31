@@ -31,10 +31,10 @@
             </span>
         </div>
         <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.875rem; color: var(--color-muted);">
-            <span>Priority: <strong>{{ task.get_priority_display }}</strong></span>
-            <span>Assignee: <strong>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</strong></span>
-            <span>Due: <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}—{% endif %}</strong></span>
+        <div class="task-list-meta">
+            <span><span class="task-meta-label">Priority</span><strong>{{ task.get_priority_display }}</strong></span>
+            <span><span class="task-meta-label">Assignee</span><strong>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</strong></span>
+            <span><span class="task-meta-label">Due date</span><strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
         </div>
         {% if task.labels.all %}
         <div class="task-labels-list">
