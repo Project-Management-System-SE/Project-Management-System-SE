@@ -689,3 +689,43 @@ def project_delete(request, project_id):
         return redirect("projects:project-list")
 
     return render(request, "project_confirm_delete.html", {"project": project})
+
+
+@login_required
+def project_workflow_settings(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    if not can_manage_project(request.user, project):
+        raise PermissionDenied("Only project managers can configure workflow transitions.")
+
+    from .forms import ProjectWorkflowConfigForm
+    from .models import ProjectWorkflowTransition
+
+    transitions = {
+        (t.from_status, t.to_status): t.is_allowed
+        for t in project.workflow_transitions.all()
+    }
+
+    initial_data = {
+        "allow_todo_to_in_progress": transitions.get(("TODO", "IN_PROGRESS"), True),
+        "allow_in_progress_to_in_review": transitions.get(("IN_PROGRESS", "IN_REVIEW"), True),
+        "allow_in_progress_to_todo": transitions.get(("IN_PROGRESS", "TODO"), True),
+        "allow_in_review_to_done": transitions.get(("IN_REVIEW", "DONE"), True),
+        "allow_in_review_to_in_progress": transitions.get(("IN_REVIEW", "IN_PROGRESS"), True),
+        "allow_done_to_in_progress": transitions.get(("DONE", "IN_PROGRESS"), True),
+        "allow_direct_todo_to_done": transitions.get(("TODO", "DONE"), False),
+    }
+
+    if request.method == "POST":
+        form = ProjectWorkflowConfigForm(request.POST)
+        if form.is_valid():
+            form.save(project)
+            messages.success(request, "Project workflow transitions updated successfully.")
+            return redirect("projects:project-workflow-settings", project_id=project.pk)
+    else:
+        form = ProjectWorkflowConfigForm(initial=initial_data)
+
+    return render(
+        request,
+        "project_workflow_settings.html",
+        {"project": project, "form": form, "can_manage_project": True},
+    )

@@ -11,6 +11,12 @@ urlpatterns = [
     path("projects/new/", views.project_create, name="project-create"),
     path("projects/<int:project_id>/", views.project_detail, name="project-detail"),
     path(
+        "projects/<int:project_id>/workflow/",
+        views.project_workflow_settings,
+        name="project-workflow-settings",
+    ),
+
+    path(
         "projects/<int:project_id>/activity/",
         views.project_activity,
         name="project-activity",
