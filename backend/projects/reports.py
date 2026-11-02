@@ -139,3 +139,51 @@ def get_team_workload_metrics(project):
         })
 
     return workload
+
+
+def generate_tasks_report_csv(project, start_date=None, end_date=None, sprint=None):
+    """Generates a comprehensive CSV export of task records for the selected filters."""
+    tasks_qs = project.tasks.select_related("assignee", "sprint", "milestone").order_by("pk")
+    if sprint:
+        tasks_qs = tasks_qs.filter(sprint=sprint)
+    if start_date:
+        tasks_qs = tasks_qs.filter(created_at__date__gte=start_date)
+    if end_date:
+        tasks_qs = tasks_qs.filter(created_at__date__lte=end_date)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Task ID",
+        "Project",
+        "Title",
+        "Status",
+        "Priority",
+        "Assignee",
+        "Sprint",
+        "Milestone",
+        "Estimated Hours",
+        "Actual Hours",
+        "Due Date",
+        "Created At",
+        "Updated At",
+    ])
+
+    for t in tasks_qs:
+        writer.writerow([
+            t.pk,
+            project.name,
+            t.title,
+            t.status,
+            t.priority,
+            t.assignee.full_name if t.assignee else "Unassigned",
+            t.sprint.name if t.sprint else "Backlog",
+            t.milestone.name if t.milestone else "None",
+            str(t.estimated_effort or "0.00"),
+            str(t.actual_effort or "0.00"),
+            t.due_date.isoformat() if t.due_date else "",
+            t.created_at.strftime("%Y-%m-%d %H:%M:%S") if t.created_at else "",
+            t.updated_at.strftime("%Y-%m-%d %H:%M:%S") if t.updated_at else "",
+        ])
+
+    return output.getvalue()
