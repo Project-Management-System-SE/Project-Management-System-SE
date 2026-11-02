@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import RestrictedError
+from django.template.loader import render_to_string
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -348,6 +349,83 @@ class TaskFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("assignee", form.errors)
 
+    def test_assignee_queryset_contains_members_owner_excludes_outsiders_and_allows_unassigned(
+        self,
+    ):
+        form = TaskForm(project=self.project)
+        assignee_queryset = form.fields["assignee"].queryset
+
+        self.assertEqual(
+            set(assignee_queryset.values_list("pk", flat=True)),
+            {self.owner.pk, self.member.pk},
+        )
+        self.assertEqual(form.fields["assignee"].empty_label, "Unassigned")
+
+    def test_edit_form_prepopulates_all_task_values(self):
+        label = TaskLabel.objects.create(project=self.project, name="frontend")
+        task = Task.objects.create(
+            project=self.project,
+            title="Existing task",
+            description="Existing description",
+            priority=Task.Priority.HIGH,
+            due_date=date(2026, 12, 31),
+            assignee=self.member,
+            status=Task.Status.IN_PROGRESS,
+            created_by=self.owner,
+        )
+        task.labels.add(label)
+
+        form = TaskForm(instance=task)
+
+        self.assertEqual(form.initial["title"], "Existing task")
+        self.assertEqual(form.initial["description"], "Existing description")
+        self.assertEqual(form.initial["priority"], Task.Priority.HIGH)
+        self.assertEqual(form.initial["due_date"], date(2026, 12, 31))
+        self.assertEqual(form.initial["assignee"], self.member.pk)
+        self.assertEqual(form.initial["status"], Task.Status.IN_PROGRESS)
+        self.assertEqual(form.fields["labels"].initial, "frontend")
+
+    def test_actual_task_form_rejects_invalid_priority(self):
+        form = TaskForm(
+            data={
+                "title": "Invalid priority task",
+                "priority": "NOT_A_PRIORITY",
+                "status": Task.Status.TODO,
+            },
+            project=self.project,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("priority", form.errors)
+
+    def test_actual_task_form_renders_field_and_non_field_errors(self):
+        form = TaskForm(
+            data={
+                "title": "Invalid priority task",
+                "priority": "NOT_A_PRIORITY",
+                "status": Task.Status.TODO,
+            },
+            project=self.project,
+        )
+        self.assertFalse(form.is_valid())
+        form.add_error(None, "Task could not be saved.")
+
+        html = render_to_string(
+            "task_form.html",
+            {
+                "form": form,
+                "form_heading": "Create task",
+                "submit_label": "Create task",
+            },
+        )
+
+        self.assertIn('id="id_priority_errors"', html)
+        self.assertIn('class="field-errors"', html)
+        self.assertIn('role="alert"', html)
+        self.assertIn("Select a valid choice", html)
+        self.assertIn("Task could not be saved.", html)
+        self.assertIn('class="form-errors"', html)
+
     def test_labels_deduplication_trimming_and_max_length(self):
         # Trimming and deduplication
         form = TaskForm(
@@ -538,6 +616,25 @@ class TaskViewAndPermissionTests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_create_rejects_outsider_assignee_without_persisting_task(self):
+        self.client.force_login(self.owner)
+        create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
+
+        response = self.client.post(
+            create_url,
+            data={
+                "title": "Task with outsider",
+                "description": "Should not be saved",
+                "priority": "HIGH",
+                "status": "TODO",
+                "assignee": str(self.outsider.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("assignee", response.context["form"].errors)
+        self.assertFalse(Task.objects.filter(title="Task with outsider").exists())
+
     def test_assignee_can_update_task_and_labels(self):
         self.client.login(email="member@example.com", password="password123")
         edit_url = reverse(
@@ -575,6 +672,55 @@ class TaskViewAndPermissionTests(TestCase):
             {"security", "in-review"},
         )
 
+    def test_edit_rejects_outsider_assignee_without_changing_task(self):
+        self.client.force_login(self.member)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = self.client.post(
+            edit_url,
+            data={
+                "title": "Attempted unauthorized assignment",
+                "description": "Should not be saved",
+                "priority": "LOW",
+                "status": "IN_PROGRESS",
+                "assignee": str(self.outsider.pk),
+                "labels": "security",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("assignee", response.context["form"].errors)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.description, "Confidential task details")
+        self.assertEqual(self.task.priority, Task.Priority.HIGH)
+        self.assertEqual(self.task.status, Task.Status.TODO)
+        self.assertEqual(self.task.assignee, self.member)
+
+    def test_outsider_cannot_edit_task(self):
+        self.client.force_login(self.outsider)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = self.client.post(
+            edit_url,
+            data={
+                "title": "Unauthorized edit",
+                "priority": "LOW",
+                "status": "TODO",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.assignee, self.member)
+
     def test_invalid_submission_re_renders_form_and_preserves_values(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
@@ -608,3 +754,27 @@ class TaskViewAndPermissionTests(TestCase):
             data={"title": "No CSRF Task"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_real_csrf_protection_on_task_edit_endpoint(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.member)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = csrf_client.post(
+            edit_url,
+            data={
+                "title": "CSRF bypass attempt",
+                "priority": "LOW",
+                "status": "TODO",
+                "assignee": str(self.member.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.priority, Task.Priority.HIGH)
+        self.assertEqual(self.task.assignee, self.member)
