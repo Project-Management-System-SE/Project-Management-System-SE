@@ -187,3 +187,48 @@ def generate_tasks_report_csv(project, start_date=None, end_date=None, sprint=No
         ])
 
     return output.getvalue()
+
+
+def generate_summary_report_csv(project):
+    """Generates an executive summary CSV containing progress KPIs, velocity, and workload."""
+    progress = get_project_progress_metrics(project)
+    velocity = get_sprint_velocity_metrics(project)
+    workload = get_team_workload_metrics(project)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["PROJECT SUMMARY REPORT"])
+    writer.writerow(["Project Name", project.name])
+    writer.writerow(["Status", project.status])
+    writer.writerow(["Owner", project.owner.full_name or project.owner.username])
+    writer.writerow(["Generated At", timezone.now().strftime("%Y-%m-%d %H:%M:%S UTC")])
+    writer.writerow([])
+
+    writer.writerow(["PROGRESS METRICS"])
+    writer.writerow(["Total Tasks", progress["total_tasks"]])
+    writer.writerow(["Completed Tasks", progress["completed_tasks"]])
+    writer.writerow(["In Progress Tasks", progress["in_progress_tasks"]])
+    writer.writerow(["In Review Tasks", progress["in_review_tasks"]])
+    writer.writerow(["To Do Tasks", progress["todo_tasks"]])
+    writer.writerow(["Completion Rate", f"{progress['completion_rate']}%"])
+    writer.writerow(["Total Estimated Hours", progress["total_estimated"]])
+    writer.writerow(["Total Actual Hours", progress["total_actual"]])
+    writer.writerow(["Effort Variance (Hours)", progress["effort_variance"]])
+    writer.writerow(["Overdue Tasks", progress["overdue_tasks"]])
+    writer.writerow([])
+
+    writer.writerow(["SPRINT VELOCITY METRICS"])
+    writer.writerow(["Closed Sprints Count", velocity["closed_sprint_count"]])
+    writer.writerow(["Average Velocity (Hours per Sprint)", velocity["average_velocity"]])
+    writer.writerow(["Sprint Name", "Status", "Total Tasks", "Completed Tasks", "Completed Effort (Hours)"])
+    for s in velocity["sprints"]:
+        writer.writerow([s["name"], s["status"], s["total_tasks"], s["completed_tasks"], s["completed_effort"]])
+    writer.writerow([])
+
+    writer.writerow(["TEAM WORKLOAD DISTRIBUTION"])
+    writer.writerow(["Member Name", "Email", "Total Tasks", "Active Tasks", "Completed Tasks", "Estimated Hours", "Actual Hours"])
+    for m in workload:
+        writer.writerow([m["name"], m["email"], m["total_tasks"], m["active_tasks"], m["completed_tasks"], m["estimated_effort"], m["actual_effort"]])
+
+    return output.getvalue()
