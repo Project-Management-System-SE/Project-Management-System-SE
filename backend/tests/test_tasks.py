@@ -2,6 +2,8 @@ from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection, transaction
+from django.db.models.deletion import RestrictedError
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -60,6 +62,24 @@ class TaskBackendModelAndLabelTests(TestCase):
         self.assertIsNone(task.due_date)
         self.assertIn("Setup database", str(task))
 
+    def test_valid_task_persistence(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="  Persisted task  ",
+            description="Task details",
+            priority=Task.Priority.HIGH,
+            status=Task.Status.IN_PROGRESS,
+            assignee=self.member,
+            created_by=self.owner,
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.title, "Persisted task")
+        self.assertEqual(task.description, "Task details")
+        self.assertEqual(task.project, self.project)
+        self.assertEqual(task.assignee, self.member)
+        self.assertEqual(task.created_by, self.owner)
+
     def test_task_assignee_validation_must_be_project_member(self):
         task = Task(
             project=self.project,
@@ -69,6 +89,57 @@ class TaskBackendModelAndLabelTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             task.clean()
+
+    def test_invalid_assignee_is_rejected_when_saved(self):
+        task = Task(
+            project=self.project,
+            title="Invalid assignee task",
+            created_by=self.owner,
+            assignee=self.other_user,
+        )
+
+        with self.assertRaises(ValidationError):
+            task.save()
+
+    def test_invalid_status_and_priority_are_rejected_by_database(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Invalid status",
+                            status="INVALID",
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Invalid priority",
+                            priority="INVALID",
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+    def test_task_indexes_cover_project_status_and_project_created_order(self):
+        constraints = connection.introspection.get_constraints(
+            connection.cursor(), Task._meta.db_table
+        )
+        index_columns = {
+            tuple(details["columns"])
+            for details in constraints.values()
+            if details.get("index")
+        }
+
+        self.assertIn(("project_id", "status"), index_columns)
+        self.assertIn(("project_id", "created_at"), index_columns)
 
     def test_labels_project_scoping_and_normalization(self):
         label1 = TaskLabel.objects.create(
@@ -98,6 +169,26 @@ class TaskBackendModelAndLabelTests(TestCase):
         )
         self.assertEqual(label_b.project, project_b)
 
+        task = Task.objects.create(
+            project=self.project,
+            title="Project-scoped labels",
+            created_by=self.owner,
+        )
+        with self.assertRaises(ValidationError):
+            task.labels.add(label_b)
+
+    def test_reverse_label_assignment_rejects_cross_project_task(self):
+        project_b = Project.objects.create(name="Beta Project", owner=self.owner)
+        label = TaskLabel.objects.create(project=self.project, name="urgent")
+        task = Task.objects.create(
+            project=project_b,
+            title="Other project task",
+            created_by=self.owner,
+        )
+
+        with self.assertRaises(ValidationError):
+            label.tasks.add(task)
+
     def test_task_labels_persistence_and_update(self):
         task = Task.objects.create(
             project=self.project,
@@ -117,6 +208,55 @@ class TaskBackendModelAndLabelTests(TestCase):
         self.assertEqual(task.labels.count(), 2)
         self.assertNotIn("ui", task.get_labels_as_string())
         self.assertIn("accessibility", task.get_labels_as_string())
+
+    def test_creator_cannot_be_deleted_while_referenced(self):
+        creator = User.objects.create_user(
+            email="creator@example.com",
+            username="creator",
+            full_name="Task Creator",
+            password="safe-password-123",
+        )
+        task = Task.objects.create(
+            project=self.project,
+            title="Protected creator",
+            created_by=creator,
+        )
+
+        with self.assertRaises(RestrictedError):
+            creator.delete()
+
+        self.assertTrue(Task.objects.filter(pk=task.pk).exists())
+
+    def test_deleted_assignee_is_set_to_null(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Nullable assignee",
+            assignee=self.member,
+            created_by=self.owner,
+        )
+
+        self.member.delete()
+
+        task.refresh_from_db()
+        self.assertIsNone(task.assignee_id)
+
+    def test_completed_timestamp_is_set_and_cleared_with_status(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Completion lifecycle",
+            created_by=self.owner,
+        )
+        self.assertIsNone(task.completed_at)
+
+        task.status = Task.Status.DONE
+        task.save(update_fields={"status"})
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+
+        task.status = Task.Status.IN_PROGRESS
+        task.save(update_fields={"status"})
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
 
 
 class TaskFormTests(TestCase):
