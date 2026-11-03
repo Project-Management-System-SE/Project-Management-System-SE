@@ -357,6 +357,52 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
 
+    def test_board_groups_tasks_by_defined_status_and_preserves_task_access(self):
+        in_progress_task = Task.objects.create(
+            project=self.project,
+            title="In progress task",
+            status=Task.Status.IN_PROGRESS,
+            created_by=self.owner,
+        )
+        done_task = Task.objects.create(
+            project=self.project,
+            title="Completed task",
+            status=Task.Status.DONE,
+            created_by=self.owner,
+        )
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"view": "board"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [column["status"] for column in response.context["task_columns"]],
+            [status for status, _ in Task.Status.choices],
+        )
+        tasks_by_status = {
+            column["status"]: column["tasks"]
+            for column in response.context["task_columns"]
+        }
+        self.assertEqual(tasks_by_status[Task.Status.TODO], [self.task])
+        self.assertEqual(tasks_by_status[Task.Status.IN_PROGRESS], [in_progress_task])
+        self.assertEqual(tasks_by_status[Task.Status.DONE], [done_task])
+        self.assertContains(response, "Tasks grouped by status")
+        self.assertContains(response, "In progress task")
+        self.assertContains(response, "Completed task")
+
+    def test_task_list_remains_default_view(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["view_mode"], "list")
+        self.assertEqual(response.context["task_columns"], [])
+        self.assertContains(response, "First Secure Task")
+        self.assertNotContains(response, "Tasks grouped by status")
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})

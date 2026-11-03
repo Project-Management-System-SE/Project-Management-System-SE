@@ -20,10 +20,24 @@ def task_list(request, project_id):
         .prefetch_related("labels")
         .order_by("-created_at")
     )
+    view_mode = "board" if request.GET.get("view") == "board" else "list"
+    task_columns = []
+    if view_mode == "board":
+        task_items = list(tasks)
+        task_columns = [
+            {
+                "status": status,
+                "label": label,
+                "tasks": [task for task in task_items if task.status == status],
+            }
+            for status, label in Task.Status.choices
+        ]
 
     context = {
         "project": project,
         "tasks": tasks,
+        "view_mode": view_mode,
+        "task_columns": task_columns,
         "can_create_task": can_create_task_in(request.user, project),
     }
     return render(request, "task_list.html", context)

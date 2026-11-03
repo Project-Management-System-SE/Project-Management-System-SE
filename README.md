@@ -119,3 +119,6 @@ Project Manager role. A project's owner remains a Project Manager and cannot be 
 own membership. Deletion requires confirmation and removes the project and its memberships, not
 the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
 requests.
+
+Open a project's **Tasks** page to switch between the task list and a status board. Task cards link
+to their details; users with task edit permission can update status and other task fields there.
