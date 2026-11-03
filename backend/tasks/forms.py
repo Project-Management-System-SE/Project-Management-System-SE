@@ -144,6 +144,10 @@ class TaskCommentForm(forms.ModelForm):
 
 
 class TaskAttachmentForm(forms.ModelForm):
+    file = forms.FileField(
+        error_messages={"empty": "The uploaded file is empty."}
+    )
+
     class Meta:
         model = TaskAttachment
         fields = ["file"]

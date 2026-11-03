@@ -127,7 +127,8 @@ Task attachments are stored below `backend/media` by default (override with `DJA
 and are served only through authenticated, project-authorized downloads. Configure the upload limit
 with `TASK_ATTACHMENT_MAX_SIZE_BYTES` (default 10 MiB) and the comma-separated extension allowlist
 with `TASK_ATTACHMENT_ALLOWED_EXTENSIONS` (default: `pdf,txt,csv,png,jpg,jpeg,gif,doc,docx,xls,xlsx`).
-The upload allowlist validates filename extensions; uploaded files are not content-scanned.
+Uploads must be non-empty, within the size limit, and pass a standard-library signature or structure
+check for the selected extension. This content validation is not malware scanning.
 
 **Issue #19 permission coordination:** collaboration currently follows `can_view_tasks_for`: active
 project members, project owners, and admins may view and add comments or attachments, while task

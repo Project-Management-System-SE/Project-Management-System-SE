@@ -664,7 +664,7 @@ class TaskCollaborationTests(TestCase):
         self.client.force_login(self.observer)
         uploaded_file = SimpleUploadedFile(
             "design.pdf",
-            b"%PDF-1.4 example",
+            b"%PDF-1.4\nQA fixture\n%%EOF\n",
             content_type="application/pdf",
         )
 
@@ -698,7 +698,10 @@ class TaskCollaborationTests(TestCase):
         self.assertEqual(response["Content-Type"], "application/octet-stream")
         self.assertEqual(response["X-Content-Type-Options"], "nosniff")
         self.assertIn('attachment; filename="design.pdf"', response["Content-Disposition"])
-        self.assertEqual(b"".join(response.streaming_content), b"%PDF-1.4 example")
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            b"%PDF-1.4\nQA fixture\n%%EOF\n",
+        )
 
     def test_disallowed_file_type_is_rejected(self):
         self.client.force_login(self.member)
@@ -716,6 +719,52 @@ class TaskCollaborationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Unsupported file type")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_allowed_extension_with_unrelated_content_is_rejected(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(
+            self.upload_url,
+            {
+                "file": SimpleUploadedFile(
+                    "renamed-executable.pdf",
+                    b"MZThis is not a PDF file",
+                    content_type="application/pdf",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "file contents do not match the .pdf file type")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_empty_and_malformed_uploads_are_rejected(self):
+        self.client.force_login(self.member)
+
+        empty_response = self.client.post(
+            self.upload_url,
+            {"file": SimpleUploadedFile("empty.txt", b"", content_type="text/plain")},
+        )
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertContains(empty_response, "The uploaded file is empty.")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+        malformed_response = self.client.post(
+            self.upload_url,
+            {
+                "file": SimpleUploadedFile(
+                    "broken.docx",
+                    b"PK\x03\x04truncated office archive",
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+        self.assertEqual(malformed_response.status_code, 200)
+        self.assertContains(
+            malformed_response,
+            "file contents do not match the .docx file type",
+        )
         self.assertFalse(TaskAttachment.objects.exists())
 
     def test_file_over_configured_size_is_rejected(self):
