@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Project Reports - {{ project.name }} - Project Flow{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <div>
+        <a href="{% url 'projects:project-detail' project.id %}" class="back-link">&larr; Back to {{ project.name }}</a>
+        <h1 class="page-title">Project Reports &amp; Analytics</h1>
+        <p class="text-secondary">Progress metrics, sprint velocity, and team workload analytics.</p>
+    </div>
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{% url 'projects:project-report-download' project.id %}?type=tasks" class="btn btn-primary">Export Tasks CSV</a>
+        <a href="{% url 'projects:project-report-download' project.id %}?type=summary" class="btn btn-secondary">Export Executive Summary</a>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-body">
+        <form method="get" style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+            <div>
+                <label style="font-weight: 500; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">Start Date</label>
+                {{ filter_form.start_date }}
+            </div>
+            <div>
+                <label style="font-weight: 500; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">End Date</label>
+                {{ filter_form.end_date }}
+            </div>
+            <div>
+                <label style="font-weight: 500; font-size: 0.85rem; display: block; margin-bottom: 0.25rem;">Sprint Filter</label>
+                {{ filter_form.sprint }}
+            </div>
+            <div>
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem; margin-bottom: 2rem;">
+    <div class="card stat-card">
+        <span class="stat-label">Completion Rate</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #10b981;">{{ progress.completion_rate }}%</span>
+        <span class="text-muted">{{ progress.completed_tasks }} / {{ progress.total_tasks }} tasks</span>
+    </div>
+    <div class="card stat-card">
+        <span class="stat-label">In Progress / Review</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #3b82f6;">{{ progress.in_progress_tasks|add:progress.in_review_tasks }}</span>
+        <span class="text-muted">Active tasks in flight</span>
+    </div>
+    <div class="card stat-card">
+        <span class="stat-label">Average Velocity</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #8b5cf6;">{{ velocity.average_velocity }}h</span>
+        <span class="text-muted">Across {{ velocity.closed_sprint_count }} closed sprint(s)</span>
+    </div>
+    <div class="card stat-card">
+        <span class="stat-label">Overdue Tasks</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #ef4444;">{{ progress.overdue_tasks }}</span>
+        <span class="text-muted">Pending action</span>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">
+        <h2 style="font-size: 1.15rem; font-weight: 600;">Team Workload Allocation</h2>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="border-bottom: 2px solid var(--border-color, #e2e8f0); text-align: left;">
+                        <th style="padding: 0.75rem;">Member</th>
+                        <th style="padding: 0.75rem;">Total Tasks</th>
+                        <th style="padding: 0.75rem;">Active</th>
+                        <th style="padding: 0.75rem;">Completed</th>
+                        <th style="padding: 0.75rem;">Estimated Effort</th>
+                        <th style="padding: 0.75rem;">Actual Logged</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in workload %}
+                    <tr style="border-bottom: 1px solid var(--border-color, #e2e8f0);">
+                        <td style="padding: 0.75rem; font-weight: 500;">{{ m.name }}</td>
+                        <td style="padding: 0.75rem;">{{ m.total_tasks }}</td>
+                        <td style="padding: 0.75rem;"><span class="badge badge-info">{{ m.active_tasks }}</span></td>
+                        <td style="padding: 0.75rem;"><span class="badge badge-success">{{ m.completed_tasks }}</span></td>
+                        <td style="padding: 0.75rem;">{{ m.estimated_effort }}h</td>
+                        <td style="padding: 0.75rem;">{{ m.actual_effort }}h</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" style="padding: 1rem; text-align: center;">No workload records.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
