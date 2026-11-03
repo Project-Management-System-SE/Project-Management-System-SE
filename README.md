@@ -122,6 +122,8 @@ requests.
 
 Open a project's **Tasks** page to switch between the task list and a status board. Task cards link
 to their details; users with task edit permission can update status and other task fields there.
+The dashboard counts tasks assigned to the signed-in user within visible projects, and project
+progress is the percentage of tasks marked Done. Use **My Tasks** to view those assigned tasks.
 
 Task attachments are stored below `backend/media` by default (override with `DJANGO_MEDIA_ROOT`)
 and are served only through authenticated, project-authorized downloads. Configure the upload limit

@@ -2,8 +2,11 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
+
+from tasks.models import Task
 
 from .forms import ProjectForm, ProjectMemberForm, ProjectUpdateForm
 from .models import Project, ProjectMembership
@@ -23,16 +26,34 @@ def _manageable_project_or_403(user, project_id):
     return project
 
 
+def _projects_with_task_progress(projects):
+    return projects.annotate(
+        task_count=Count("tasks", distinct=True),
+        completed_task_count=Count(
+            "tasks",
+            filter=Q(tasks__status=Task.Status.DONE),
+            distinct=True,
+        ),
+    )
+
+
 @login_required
 def dashboard(request):
     projects = visible_projects_for(request.user)
+    project_task_counts = Task.objects.filter(
+        project__in=projects,
+        assignee=request.user,
+    ).aggregate(
+        my_tasks=Count("pk"),
+        completed_tasks=Count("pk", filter=Q(status=Task.Status.DONE)),
+    )
 
     context = {
         "total_projects": projects.count(),
         "active_projects": projects.filter(status=Project.Status.ACTIVE).count(),
-        "my_tasks": None,
-        "completed_tasks": None,
-        "projects": projects[:5],
+        "my_tasks": project_task_counts["my_tasks"],
+        "completed_tasks": project_task_counts["completed_tasks"],
+        "projects": _projects_with_task_progress(projects)[:5],
         "can_create_project": can_create_project(request.user),
     }
     return render(request, "dashboard.html", context)
@@ -40,7 +61,7 @@ def dashboard(request):
 
 @login_required
 def project_list(request):
-    projects = visible_projects_for(request.user)
+    projects = _projects_with_task_progress(visible_projects_for(request.user))
     context = {
         "projects": projects,
         "can_create_project": can_create_project(request.user),

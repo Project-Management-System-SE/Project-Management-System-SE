@@ -87,6 +87,20 @@ def task_list(request, project_id):
 
 
 @login_required
+def my_tasks(request):
+    tasks = (
+        Task.objects.filter(
+            project__in=visible_projects_for(request.user),
+            assignee=request.user,
+        )
+        .select_related("project", "assignee", "created_by")
+        .prefetch_related("labels")
+        .order_by("due_date", "-created_at")
+    )
+    return render(request, "my_tasks.html", {"tasks": tasks})
+
+
+@login_required
 def task_create(request, project_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     if not can_create_task_in(request.user, project):

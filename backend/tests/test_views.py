@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from accounts.models import User
 from projects.models import Project, ProjectMembership
+from tasks.models import Task
 
 
 def create_user(email, username, full_name):
@@ -54,6 +55,19 @@ class DashboardViewTests(TestCase):
             project_role=ProjectMembership.Role.PROJECT_MANAGER,
         )
         Project.objects.create(name="Planned project", owner=self.owner)
+        Task.objects.create(
+            project=active_project,
+            title="In progress task",
+            created_by=self.owner,
+            assignee=self.owner,
+        )
+        Task.objects.create(
+            project=active_project,
+            title="Finished task",
+            created_by=self.owner,
+            assignee=self.owner,
+            status=Task.Status.DONE,
+        )
 
         self.client.force_login(self.owner)
         response = self.client.get(reverse("projects:dashboard"))
@@ -61,8 +75,8 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["total_projects"], 2)
         self.assertEqual(response.context["active_projects"], 1)
-        self.assertIsNone(response.context["my_tasks"])
-        self.assertIsNone(response.context["completed_tasks"])
+        self.assertEqual(response.context["my_tasks"], 2)
+        self.assertEqual(response.context["completed_tasks"], 1)
         self.assertEqual(len(response.context["projects"]), 2)
         self.assertContains(response, 'href="/static/css/style.css"')
         self.assertContains(response, "Active project")
@@ -70,9 +84,10 @@ class DashboardViewTests(TestCase):
         self.assertContains(response, "Active")
         self.assertContains(response, "Nov 1, 2026")
         self.assertContains(response, "Planned project")
-        self.assertContains(response, "Progress unavailable")
-        self.assertContains(response, "Task data unavailable")
+        self.assertContains(response, ">50%</span>")
+        self.assertContains(response, "No tasks yet")
         self.assertContains(response, 'href="/projects/new/"')
+        self.assertContains(response, 'href="/my-tasks/"')
 
     def test_dashboard_renders_empty_state_for_project_manager(self):
         self.client.force_login(self.admin)
@@ -124,6 +139,73 @@ class DashboardViewTests(TestCase):
         )
 
 
+class MyTasksViewTests(TestCase):
+    def setUp(self):
+        self.owner = create_user("owner@example.com", "owner", "Project Owner")
+        self.member = create_user("member@example.com", "member", "Team Member")
+        self.outsider = create_user("outsider@example.com", "outsider", "Outsider")
+        self.project = Project.objects.create(name="Visible project", owner=self.owner)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        self.visible_task = Task.objects.create(
+            project=self.project,
+            title="Assigned task",
+            created_by=self.owner,
+            assignee=self.member,
+        )
+
+    def test_my_tasks_shows_only_assigned_tasks_in_visible_projects(self):
+        hidden_project = Project.objects.create(
+            name="Hidden project",
+            owner=self.outsider,
+        )
+        Task.objects.create(
+            project=hidden_project,
+            title="Hidden task",
+            created_by=self.outsider,
+            assignee=self.member,
+        )
+        Task.objects.create(
+            project=self.project,
+            title="Unassigned task",
+            created_by=self.owner,
+        )
+
+        self.client.force_login(self.member)
+        response = self.client.get(reverse("tasks:my-tasks"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(response.context["tasks"].values_list("pk", flat=True)),
+            [self.visible_task.pk],
+        )
+        self.assertContains(response, "Assigned task")
+        self.assertContains(response, "Visible project")
+        self.assertNotContains(response, "Hidden task")
+        self.assertContains(
+            response,
+            reverse(
+                "tasks:task-detail",
+                kwargs={
+                    "project_id": self.project.pk,
+                    "task_id": self.visible_task.pk,
+                },
+            ),
+        )
+
+    def test_my_tasks_requires_login(self):
+        response = self.client.get(reverse("tasks:my-tasks"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{reverse('login')}?next={reverse('tasks:my-tasks')}",
+        )
+
+
 class ProjectVisibilityTests(TestCase):
     def setUp(self):
         self.owner = create_user("owner@example.com", "owner", "Project Owner")
@@ -164,6 +246,26 @@ class ProjectVisibilityTests(TestCase):
         response = self.client.get(reverse("projects:project-list"))
 
         self.assertIn(self.project, response.context["projects"])
+
+    def test_project_list_renders_task_completion_progress(self):
+        Task.objects.create(
+            project=self.project,
+            title="Completed task",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+        )
+        Task.objects.create(
+            project=self.project,
+            title="Open task",
+            created_by=self.owner,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:project-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<progress", html=False)
+        self.assertContains(response, ">50%</span>")
 
     def test_admin_sees_all_projects(self):
         other_owner = create_user("other@example.com", "other", "Other Owner")
@@ -228,7 +330,7 @@ class ProjectViewTests(TestCase):
         self.assertContains(response, "Release planning")
         self.assertContains(response, "Prepare the upcoming release")
         self.assertContains(response, "On Hold")
-        self.assertContains(response, "Progress unavailable")
+        self.assertContains(response, "No tasks yet")
 
     def test_project_form_supplies_template_fields(self):
         self.client.force_login(self.admin)
