@@ -772,3 +772,37 @@ def project_reports(request, project_id):
             "can_manage_project": can_manage_project(request.user, project),
         },
     )
+
+
+@login_required
+def project_report_download(request, project_id):
+    from django.http import HttpResponse
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    from .forms import ProjectReportFilterForm
+    from .reports import generate_summary_report_csv, generate_tasks_report_csv
+
+    report_type = request.GET.get("type", "tasks")
+    filter_form = ProjectReportFilterForm(request.GET, project=project)
+    start_date = None
+    end_date = None
+    selected_sprint = None
+    if filter_form.is_valid():
+        start_date = filter_form.cleaned_data.get("start_date")
+        end_date = filter_form.cleaned_data.get("end_date")
+        selected_sprint = filter_form.cleaned_data.get("sprint")
+
+    if report_type == "summary":
+        csv_data = generate_summary_report_csv(project)
+        filename = f"{project.name.replace(' ', '_')}_summary_report.csv"
+    else:
+        csv_data = generate_tasks_report_csv(
+            project,
+            start_date=start_date,
+            end_date=end_date,
+            sprint=selected_sprint,
+        )
+        filename = f"{project.name.replace(' ', '_')}_tasks_report.csv"
+
+    response = HttpResponse(csv_data, content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
