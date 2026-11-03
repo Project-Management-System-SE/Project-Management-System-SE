@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.signals import m2m_changed
+from django.dispatch import receiver
 from django.utils import timezone
 
 
@@ -89,6 +91,28 @@ class Task(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(status__in=["TODO", "IN_PROGRESS", "DONE"]),
+                name="task_status_valid_choice",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    priority__in=["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+                ),
+                name="task_priority_valid_choice",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["project", "status"],
+                name="task_project_status_idx",
+            ),
+            models.Index(
+                fields=["project", "-created_at"],
+                name="task_project_created_idx",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -107,10 +131,22 @@ class Task(models.Model):
     def save(self, *args, **kwargs):
         if self.title:
             self.title = self.title.strip()
+        completion_changed = False
         if self.status == self.Status.DONE and not self.completed_at:
             self.completed_at = timezone.now()
+            completion_changed = True
         elif self.status != self.Status.DONE and self.completed_at:
             self.completed_at = None
+            completion_changed = True
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if completion_changed:
+                update_fields.add("completed_at")
+            kwargs["update_fields"] = update_fields
+
+        self.full_clean(validate_unique=False)
         super().save(*args, **kwargs)
 
     def get_labels_as_string(self):
@@ -182,3 +218,26 @@ class UserNotification(models.Model):
 
     def __str__(self):
         return f"{self.title} for {self.recipient}"
+
+
+@receiver(m2m_changed, sender=Task.labels.through)
+def validate_task_label_project(sender, instance, action, pk_set, **kwargs):
+    if action != "pre_add" or not pk_set:
+        return
+
+    if isinstance(instance, Task):
+        mismatched_labels = TaskLabel.objects.filter(
+            pk__in=pk_set
+        ).exclude(project_id=instance.project_id)
+        if mismatched_labels.exists():
+            raise ValidationError(
+                "A task can only be associated with labels from its project."
+            )
+    elif isinstance(instance, TaskLabel):
+        mismatched_tasks = Task.objects.filter(
+            pk__in=pk_set
+        ).exclude(project_id=instance.project_id)
+        if mismatched_tasks.exists():
+            raise ValidationError(
+                "A task can only be associated with labels from its project."
+            )
