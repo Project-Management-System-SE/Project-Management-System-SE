@@ -63,4 +63,81 @@
         </div>
     </div>
 </article>
+
+<section class="task-collaboration" aria-labelledby="task-comments-heading">
+    <div class="task-collaboration-section">
+        <h2 id="task-comments-heading">Comments</h2>
+        {% if comments %}
+        <ol class="task-comments">
+            {% for comment in comments %}
+            <li class="card task-comment">
+                <div class="task-comment-meta">
+                    <strong>{{ comment.author.full_name|default:comment.author.email }}</strong>
+                    <time datetime="{{ comment.created_at|date:'c' }}">{{ comment.created_at|date:"M j, Y H:i" }}</time>
+                </div>
+                <p>{{ comment.content|linebreaksbr }}</p>
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p class="task-collaboration-empty">No comments yet.</p>
+        {% endif %}
+
+        <form class="card task-collaboration-form" method="post"
+            action="{% url 'tasks:task-comment-create' project.pk task.pk %}">
+            {% csrf_token %}
+            {% if comment_form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ comment_form.non_field_errors }}</div>
+            {% endif %}
+            <div class="form-field">
+                <label for="{{ comment_form.content.id_for_label }}">Add a comment</label>
+                {{ comment_form.content }}
+                {% if comment_form.content.errors %}
+                <div class="field-errors" role="alert">{{ comment_form.content.errors }}</div>
+                {% endif %}
+            </div>
+            <button type="submit">Post comment</button>
+        </form>
+    </div>
+
+    <div class="task-collaboration-section">
+        <h2 id="task-attachments-heading">Attachments</h2>
+        {% if attachments %}
+        <ul class="task-attachments">
+            {% for attachment in attachments %}
+            <li class="card task-attachment">
+                <div>
+                    <a href="{% url 'tasks:task-attachment-download' project.pk task.pk attachment.pk %}">{{ attachment.original_filename }}</a>
+                    <p class="task-attachment-meta">
+                        Uploaded by {{ attachment.uploaded_by.full_name|default:attachment.uploaded_by.email }}
+                        on {{ attachment.created_at|date:"M j, Y H:i" }}
+                    </p>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="task-collaboration-empty">No attachments yet.</p>
+        {% endif %}
+
+        <form class="card task-collaboration-form" method="post" enctype="multipart/form-data"
+            action="{% url 'tasks:task-attachment-upload' project.pk task.pk %}">
+            {% csrf_token %}
+            {% if attachment_form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ attachment_form.non_field_errors }}</div>
+            {% endif %}
+            <div class="form-field">
+                <label for="{{ attachment_form.file.id_for_label }}">Upload a file</label>
+                {{ attachment_form.file }}
+                {% if attachment_form.file.help_text %}
+                <small class="field-help">{{ attachment_form.file.help_text }}</small>
+                {% endif %}
+                {% if attachment_form.file.errors %}
+                <div class="field-errors" role="alert">{{ attachment_form.file.errors }}</div>
+                {% endif %}
+            </div>
+            <button type="submit">Upload attachment</button>
+        </form>
+    </div>
+</section>
 {% endblock %}

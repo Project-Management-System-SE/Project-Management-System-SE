@@ -622,6 +622,69 @@ textarea::placeholder {
     font-size: 0.9375rem;
 }
 
+.task-collaboration {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.task-collaboration-section {
+    display: grid;
+    align-content: start;
+    gap: 1rem;
+    min-width: 0;
+}
+
+.task-collaboration-section h2 {
+    margin: 0;
+}
+
+.task-comments,
+.task-attachments {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.task-comment,
+.task-attachment {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.task-comment-meta {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.375rem 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+}
+
+.task-comment-meta strong {
+    color: var(--color-text);
+}
+
+.task-comment p,
+.task-attachment-meta,
+.task-collaboration-empty {
+    margin: 0;
+}
+
+.task-attachment-meta {
+    margin-top: 0.25rem;
+    color: var(--color-muted);
+    font-size: 0.875rem;
+}
+
+.task-collaboration-form {
+    min-width: 0;
+}
+
 .project-list-due-date {
     margin: 0;
     color: var(--color-muted);
@@ -808,6 +871,10 @@ textarea::placeholder {
     .dashboard-project-card {
         grid-template-columns: minmax(0, 1fr);
         gap: 0.875rem;
+    }
+
+    .task-collaboration {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

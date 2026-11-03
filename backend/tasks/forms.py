@@ -1,9 +1,16 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Q
 
-from .models import Task, TaskLabel
+from .models import (
+    Task,
+    TaskAttachment,
+    TaskComment,
+    TaskLabel,
+    task_attachment_max_size_label,
+)
 
 User = get_user_model()
 
@@ -123,3 +130,40 @@ class TaskForm(forms.ModelForm):
             )
             label_objs.append(label_obj)
         task.labels.set(label_objs)
+
+
+class TaskCommentForm(forms.ModelForm):
+    class Meta:
+        model = TaskComment
+        fields = ["content"]
+        widgets = {
+            "content": forms.Textarea(
+                attrs={"rows": 4, "placeholder": "Write a comment"}
+            ),
+        }
+
+
+class TaskAttachmentForm(forms.ModelForm):
+    class Meta:
+        model = TaskAttachment
+        fields = ["file"]
+        widgets = {
+            "file": forms.ClearableFileInput(
+                attrs={
+                    "accept": ",".join(
+                        f".{extension}"
+                        for extension in settings.TASK_ATTACHMENT_ALLOWED_EXTENSIONS
+                    )
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        allowed_types = ", ".join(
+            f".{extension}" for extension in settings.TASK_ATTACHMENT_ALLOWED_EXTENSIONS
+        )
+        self.fields["file"].help_text = (
+            f"Allowed file types: {allowed_types}. "
+            f"Maximum size: {task_attachment_max_size_label()}."
+        )
