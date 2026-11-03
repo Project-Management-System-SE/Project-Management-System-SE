@@ -48,7 +48,7 @@ def notify_task_comment(task, comment):
         title=f"New comment on task: {task.title}",
         message=(
             f"{comment.author.full_name} commented on '{task.title}' "
-            f"in project '{task.project.name}':\n\n{comment.body}"
+            f"in project '{task.project.name}':\n\n{comment.content}"
         ),
         recipients=recipients.values(),
     )
