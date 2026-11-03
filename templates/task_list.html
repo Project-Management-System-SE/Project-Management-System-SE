@@ -15,10 +15,10 @@
     <div class="project-form-actions">
         <nav class="task-view-toggle" aria-label="Task view">
             <a class="button{% if view_mode == 'board' %} button-secondary{% endif %}"
-                href="{% url 'tasks:task-list' project.pk %}"
+                href="{% url 'tasks:task-list' project.pk %}{% if filter_query %}?{{ filter_query }}{% endif %}"
                 {% if view_mode == 'list' %}aria-current="page"{% endif %}>List</a>
             <a class="button{% if view_mode != 'board' %} button-secondary{% endif %}"
-                href="{% url 'tasks:task-list' project.pk %}?view=board"
+                href="{% url 'tasks:task-list' project.pk %}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=board"
                 {% if view_mode == 'board' %}aria-current="page"{% endif %}>Board</a>
         </nav>
         {% if can_create_task %}
@@ -27,6 +27,25 @@
         <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">Project details</a>
     </div>
 </section>
+
+<form class="card search-filter-form" method="get">
+    {% if view_mode == 'board' %}<input type="hidden" name="view" value="board">{% endif %}
+    {% for field in filter_form %}
+    <div class="form-field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}
+        <div class="field-errors" role="alert">{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="search-filter-actions">
+        <button type="submit">Apply filters</button>
+        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}{% if view_mode == 'board' %}?view=board{% endif %}">
+            Clear filters
+        </a>
+    </div>
+</form>
 
 {% if view_mode == 'board' %}
 <div class="task-board" aria-label="Tasks grouped by status">
@@ -101,5 +120,17 @@
     {% endif %}
 </div>
 {% endif %}
+{% endif %}
+
+{% if page_obj and page_obj.has_other_pages %}
+<nav class="pagination-nav" aria-label="Task pages">
+    {% if page_obj.has_previous %}
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+    {% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+    {% endif %}
+</nav>
 {% endif %}
 {% endblock %}

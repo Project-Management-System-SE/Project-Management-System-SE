@@ -332,6 +332,69 @@ class ProjectViewTests(TestCase):
         self.assertContains(response, "On Hold")
         self.assertContains(response, "No tasks yet")
 
+    def test_project_search_matches_name_or_description_within_visible_projects(self):
+        matching_project = Project.objects.create(
+            name="Release planning",
+            description="Prepare for the winter launch",
+            owner=self.owner,
+        )
+        hidden_owner = create_user("hidden@example.com", "hidden", "Hidden Owner")
+        Project.objects.create(
+            name="Hidden release planning",
+            description="Secret project",
+            owner=hidden_owner,
+        )
+        self.client.force_login(self.owner)
+
+        name_response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Release planning"},
+        )
+        description_response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "winter launch"},
+        )
+
+        self.assertEqual(list(name_response.context["projects"]), [matching_project])
+        self.assertEqual(
+            list(description_response.context["projects"]),
+            [matching_project],
+        )
+        self.assertNotContains(name_response, "Hidden release planning")
+
+    def test_project_search_empty_results_and_clear_link(self):
+        Project.objects.create(name="Available project", owner=self.owner)
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "no matching project"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["projects"]), [])
+        self.assertContains(response, "No projects yet")
+        self.assertContains(response, "Clear")
+
+    def test_project_list_paginates_filtered_results_and_preserves_search(self):
+        for index in range(21):
+            Project.objects.create(name=f"Paged project {index}", owner=self.owner)
+        self.client.force_login(self.owner)
+
+        first_page = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Paged"},
+        )
+        second_page = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Paged", "page": "2"},
+        )
+
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
+        self.assertEqual(len(first_page.context["projects"]), 20)
+        self.assertContains(first_page, "q=Paged&amp;page=2")
+        self.assertEqual(len(second_page.context["projects"]), 1)
+
     def test_project_form_supplies_template_fields(self):
         self.client.force_login(self.admin)
 

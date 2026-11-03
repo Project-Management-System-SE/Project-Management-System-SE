@@ -3,14 +3,16 @@ import logging
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
 from projects.permissions import visible_projects_for
 
-from .forms import TaskAttachmentForm, TaskCommentForm, TaskForm
+from .forms import TaskAttachmentForm, TaskCommentForm, TaskFilterForm, TaskForm
 from .models import Task, TaskAttachment
 from .permissions import can_create_task_in, can_edit_task, can_view_tasks_for
 
@@ -64,7 +66,31 @@ def task_list(request, project_id):
         .order_by("-created_at")
     )
     view_mode = "board" if request.GET.get("view") == "board" else "list"
+    filter_form = TaskFilterForm(request.GET, project=project)
+    if filter_form.is_valid():
+        filters = filter_form.cleaned_data
+        if filters["q"]:
+            tasks = tasks.filter(
+                Q(title__icontains=filters["q"])
+                | Q(description__icontains=filters["q"])
+            )
+        if filters["assignee"]:
+            tasks = tasks.filter(assignee=filters["assignee"])
+        if filters["priority"]:
+            tasks = tasks.filter(priority=filters["priority"])
+        if filters["status"]:
+            tasks = tasks.filter(status=filters["status"])
+        if filters["label"]:
+            tasks = tasks.filter(labels=filters["label"])
+    else:
+        tasks = tasks.none()
+
+    filter_parameters = request.GET.copy()
+    filter_parameters.pop("view", None)
+    filter_parameters.pop("page", None)
+    filter_query = filter_parameters.urlencode()
     task_columns = []
+    page_obj = None
     if view_mode == "board":
         task_items = list(tasks)
         task_columns = [
@@ -75,12 +101,18 @@ def task_list(request, project_id):
             }
             for status, label in Task.Status.choices
         ]
+    else:
+        page_obj = Paginator(tasks, 20).get_page(request.GET.get("page"))
+        tasks = page_obj.object_list
 
     context = {
         "project": project,
         "tasks": tasks,
         "view_mode": view_mode,
         "task_columns": task_columns,
+        "filter_form": filter_form,
+        "filter_query": filter_query,
+        "page_obj": page_obj,
         "can_create_task": can_create_task_in(request.user, project),
     }
     return render(request, "task_list.html", context)

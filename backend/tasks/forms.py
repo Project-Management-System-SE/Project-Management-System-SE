@@ -15,6 +15,44 @@ from .models import (
 User = get_user_model()
 
 
+class TaskFilterForm(forms.Form):
+    q = forms.CharField(
+        required=False,
+        max_length=100,
+        label="Keyword",
+        widget=forms.TextInput(attrs={"placeholder": "Task title or description"}),
+    )
+    assignee = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        empty_label="All assignees",
+    )
+    priority = forms.ChoiceField(
+        choices=(("", "All priorities"), *Task.Priority.choices),
+        required=False,
+    )
+    status = forms.ChoiceField(
+        choices=(("", "All statuses"), *Task.Status.choices),
+        required=False,
+    )
+    label = forms.ModelChoiceField(
+        queryset=TaskLabel.objects.none(),
+        required=False,
+        empty_label="All labels",
+    )
+
+    def __init__(self, *args, project, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["assignee"].queryset = (
+            User.objects.filter(
+                Q(project_memberships__project=project) | Q(owned_projects=project)
+            )
+            .distinct()
+            .order_by("full_name", "email")
+        )
+        self.fields["label"].queryset = project.labels.order_by("name")
+
+
 class TaskForm(forms.ModelForm):
     labels = forms.CharField(
         required=False,

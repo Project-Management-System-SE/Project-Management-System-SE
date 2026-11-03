@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,7 +9,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from tasks.models import Task
 
-from .forms import ProjectForm, ProjectMemberForm, ProjectUpdateForm
+from .forms import ProjectForm, ProjectMemberForm, ProjectSearchForm, ProjectUpdateForm
 from .models import Project, ProjectMembership
 from .permissions import (
     can_create_project,
@@ -62,10 +63,29 @@ def dashboard(request):
 @login_required
 def project_list(request):
     projects = _projects_with_task_progress(visible_projects_for(request.user))
+    search_form = ProjectSearchForm(request.GET)
+    if search_form.is_valid():
+        query = search_form.cleaned_data["q"]
+        if query:
+            projects = projects.filter(
+                Q(name__icontains=query) | Q(description__icontains=query)
+            )
+    else:
+        projects = projects.none()
+
+    manageable_project_ids = manageable_project_ids_for(request.user, projects)
+    project_parameters = request.GET.copy()
+    project_parameters.pop("page", None)
+    project_query = project_parameters.urlencode()
+    page_obj = Paginator(projects, 20).get_page(request.GET.get("page"))
+
     context = {
-        "projects": projects,
+        "projects": page_obj,
+        "page_obj": page_obj,
+        "page_query": project_query,
+        "search_form": search_form,
         "can_create_project": can_create_project(request.user),
-        "manageable_project_ids": manageable_project_ids_for(request.user, projects),
+        "manageable_project_ids": manageable_project_ids,
     }
     return render(request, "projects.html", context)
 

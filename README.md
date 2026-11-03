@@ -124,6 +124,8 @@ Open a project's **Tasks** page to switch between the task list and a status boa
 to their details; users with task edit permission can update status and other task fields there.
 The dashboard counts tasks assigned to the signed-in user within visible projects, and project
 progress is the percentage of tasks marked Done. Use **My Tasks** to view those assigned tasks.
+Project and task search supports the currently available fields; sprint filtering is pending the
+sprint lifecycle/model work tracked in issue #41.
 
 Task attachments are stored below `backend/media` by default (override with `DJANGO_MEDIA_ROOT`)
 and are served only through authenticated, project-authorized downloads. Configure the upload limit

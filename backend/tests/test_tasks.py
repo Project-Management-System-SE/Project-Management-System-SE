@@ -406,6 +406,85 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "First Secure Task")
         self.assertNotContains(response, "Tasks grouped by status")
 
+    def test_task_filters_combine_keyword_assignee_priority_status_and_label(self):
+        matching_label = self.task.labels.get()
+        other_task = Task.objects.create(
+            project=self.project,
+            title="First Secure Task follow-up",
+            description="Confidential task details",
+            priority=Task.Priority.LOW,
+            status=Task.Status.DONE,
+            created_by=self.owner,
+            assignee=self.owner,
+        )
+        other_label = TaskLabel.objects.create(
+            project=self.project,
+            name="follow-up",
+        )
+        other_task.labels.add(other_label)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+        self.client.force_login(self.member)
+
+        response = self.client.get(
+            list_url,
+            {
+                "q": "First Secure",
+                "assignee": str(self.member.pk),
+                "priority": Task.Priority.HIGH,
+                "status": Task.Status.TODO,
+                "label": str(matching_label.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(response.context["tasks"].values_list("pk", flat=True)),
+            [self.task.pk],
+        )
+        self.assertContains(response, "First Secure Task")
+        self.assertNotContains(response, "First Secure Task follow-up")
+
+    def test_task_filter_empty_state_and_clear_link(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"q": "no matching task", "view": "board"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["view_mode"], "board")
+        self.assertEqual(list(response.context["tasks"]), [])
+        self.assertContains(response, "No tasks in this status.")
+        self.assertContains(response, "Clear filters")
+
+    def test_invalid_assignee_filter_is_rejected(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"assignee": str(self.outsider.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["filter_form"].is_valid())
+        self.assertEqual(list(response.context["tasks"]), [])
+        self.assertContains(response, "Select a valid choice")
+
+    def test_task_list_paginates_filtered_results_and_preserves_search(self):
+        for index in range(21):
+            Task.objects.create(
+                project=self.project,
+                title=f"Paged task {index}",
+                created_by=self.owner,
+            )
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        first_page = self.client.get(list_url, {"q": "Paged"})
+        second_page = self.client.get(list_url, {"q": "Paged", "page": "2"})
+
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
+        self.assertEqual(len(first_page.context["tasks"]), 20)
+        self.assertContains(first_page, "q=Paged&amp;page=2")
+        self.assertEqual(len(second_page.context["tasks"]), 1)
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
