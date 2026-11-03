@@ -4,12 +4,18 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from projects.permissions import visible_projects_for
 
-from .forms import TaskForm, TaskStatusForm
-from .models import Task
+from .forms import TaskCommentForm, TaskForm, TaskStatusForm
+from .models import Task, TaskComment, UserNotification
+from .notifications import (
+    notify_task_assignment,
+    notify_task_comment,
+    notify_task_status_change,
+)
 from .permissions import can_create_task_in, can_edit_task
 
 
@@ -59,6 +65,8 @@ def task_create(request, project_id):
                 task.created_by = request.user
                 task.save()
                 form.save_m2m()
+                if task.assignee_id:
+                    notify_task_assignment(task)
             messages.success(request, f"Task '{task.title}' created successfully.")
             return redirect(
                 "tasks:task-detail",
@@ -102,6 +110,8 @@ def task_detail(request, project_id, task_id):
             "can_edit_task": can_edit,
             "can_update_status": can_edit,
             "status_form": TaskStatusForm(initial={"status": task.status}),
+            "comments": task.comments.select_related("author"),
+            "comment_form": TaskCommentForm(),
         },
     )
 
@@ -116,11 +126,17 @@ def task_update(request, project_id, task_id):
     if not can_edit_task(request.user, task):
         raise PermissionDenied("You do not have permission to edit this task.")
 
+    previous_assignee_id = task.assignee_id
+    previous_status = task.status
     if request.method == "POST":
         form = TaskForm(request.POST, instance=task, project=project)
         if form.is_valid():
             with transaction.atomic():
-                form.save()
+                task = form.save()
+                if task.assignee_id and task.assignee_id != previous_assignee_id:
+                    notify_task_assignment(task)
+                if task.status != previous_status:
+                    notify_task_status_change(task, request.user)
             messages.success(request, f"Task '{task.title}' updated successfully.")
             return redirect(
                 "tasks:task-detail",
@@ -157,8 +173,12 @@ def task_update_status(request, project_id, task_id):
 
     status_form = TaskStatusForm(request.POST)
     if status_form.is_valid():
+        previous_status = task.status
         task.status = status_form.cleaned_data["status"]
-        task.save()
+        with transaction.atomic():
+            task.save()
+            if task.status != previous_status:
+                notify_task_status_change(task, request.user)
         messages.success(request, "Task status updated.")
         return redirect(
             "tasks:task-detail",
@@ -175,6 +195,76 @@ def task_update_status(request, project_id, task_id):
             "can_edit_task": True,
             "can_update_status": True,
             "status_form": status_form,
+            "comments": task.comments.select_related("author"),
+            "comment_form": TaskCommentForm(),
         },
         status=400,
     )
+
+
+@login_required
+@require_POST
+def task_add_comment(request, project_id, task_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    task = get_object_or_404(
+        project.tasks.select_related("assignee", "created_by", "project"),
+        pk=task_id,
+    )
+    form = TaskCommentForm(request.POST)
+
+    if form.is_valid():
+        with transaction.atomic():
+            comment = form.save(commit=False)
+            comment.task = task
+            comment.author = request.user
+            comment.save()
+            notify_task_comment(task, comment)
+        messages.success(request, "Comment added.")
+        return redirect(
+            "tasks:task-detail",
+            project_id=project.pk,
+            task_id=task.pk,
+        )
+
+    return render(
+        request,
+        "task_detail.html",
+        {
+            "project": project,
+            "task": task,
+            "can_edit_task": can_edit_task(request.user, task),
+            "can_update_status": can_edit_task(request.user, task),
+            "status_form": TaskStatusForm(initial={"status": task.status}),
+            "comments": task.comments.select_related("author"),
+            "comment_form": form,
+        },
+        status=400,
+    )
+
+
+@login_required
+def notification_inbox(request):
+    notifications = request.user.notifications.all()
+    return render(
+        request,
+        "notifications.html",
+        {
+            "notifications": notifications,
+            "unread_count": notifications.filter(read_at__isnull=True).count(),
+        },
+    )
+
+
+@login_required
+@require_POST
+def notification_mark_read(request, notification_id):
+    notification = get_object_or_404(
+        UserNotification,
+        pk=notification_id,
+        recipient=request.user,
+    )
+    if notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["read_at"])
+
+    return redirect("tasks:notification-inbox")

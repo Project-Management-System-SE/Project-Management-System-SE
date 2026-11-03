@@ -632,6 +632,12 @@ class LoginViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="username"')
         self.assertContains(response, 'name="password"')
+        self.assertNotContains(response, 'name="remember_me"')
+        self.assertContains(response, 'autocomplete="on"')
+        self.assertContains(response, 'type="email" name="username"')
+        self.assertContains(response, 'type="password" name="password" autocomplete="current-password"')
+        self.assertContains(response, 'autocomplete="username"')
+        self.assertContains(response, 'autocomplete="current-password"')
 
     def test_login_with_email_creates_authenticated_session(self):
         response = self.client.post(
@@ -645,6 +651,16 @@ class LoginViewTests(TestCase):
 
         dashboard_response = self.client.get(reverse("projects:dashboard"))
         self.assertTrue(dashboard_response.wsgi_request.user.is_authenticated)
+
+    def test_login_keeps_session_for_thirty_days_without_a_checkbox(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email, "password": self.password},
+        )
+
+        self.assertRedirects(response, reverse("projects:dashboard"))
+        self.assertFalse(self.client.session.get_expire_at_browser_close())
+        self.assertEqual(self.client.session.get_expiry_age(), 60 * 60 * 24 * 30)
 
     def test_login_rejects_invalid_password(self):
         response = self.client.post(

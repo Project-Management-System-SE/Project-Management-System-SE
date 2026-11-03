@@ -21,7 +21,7 @@
 </section>
 
 <article class="card">
-    <div class="task-detail-meta" style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap;">
+    <div class="task-detail-meta">
         <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
             {{ task.get_status_display }}
         </span>
@@ -33,7 +33,7 @@
     <h3>Description</h3>
     <p>{{ task.description|default:"No description provided."|linebreaksbr }}</p>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+    <div class="task-detail-grid">
         <div>
             <strong>Assignee:</strong>
             <p>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</p>
@@ -52,8 +52,8 @@
         </div>
     </div>
 
-    <div style="margin-top: 1.5rem;">
-        <strong>Labels:</strong>
+    <div class="task-detail-labels">
+        <strong>Labels</strong>
         <div class="task-labels-list">
             {% for label in task.labels.all %}
             <span class="task-label">{{ label.name }}</span>
@@ -82,4 +82,34 @@
     </form>
 </section>
 {% endif %}
+
+<section class="card project-form" id="task-comments" aria-labelledby="task-comments-heading">
+    <h2 id="task-comments-heading">Comments</h2>
+    <div class="task-comments-list">
+        {% for comment in comments %}
+        <article class="task-comment">
+            <p class="task-comment-meta">
+                <strong>{{ comment.author.full_name|default:comment.author.email }}</strong>
+                <time datetime="{{ comment.created_at|date:'c' }}">{{ comment.created_at|date:"M j, Y H:i" }}</time>
+            </p>
+            <p>{{ comment.body|linebreaksbr }}</p>
+        </article>
+        {% empty %}
+        <p>No comments yet.</p>
+        {% endfor %}
+    </div>
+    <form method="post" action="{% url 'tasks:task-add-comment' project.pk task.pk %}">
+        {% csrf_token %}
+        <div class="form-field">
+            <label for="{{ comment_form.body.id_for_label }}">Add a comment</label>
+            {{ comment_form.body }}
+            {% if comment_form.body.errors %}
+            <div class="field-errors" role="alert">{{ comment_form.body.errors }}</div>
+            {% endif %}
+        </div>
+        <div class="project-form-actions">
+            <button type="submit">Post comment</button>
+        </div>
+    </form>
+</section>
 {% endblock %}

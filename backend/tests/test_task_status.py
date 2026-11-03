@@ -1,6 +1,6 @@
 from datetime import date
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from accounts.models import User
@@ -8,6 +8,7 @@ from projects.models import Project, ProjectMembership
 from tasks.models import Task
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class TaskStatusViewTests(TestCase):
     def setUp(self):
         self.owner = self.create_user("owner@example.com", "owner", "Project Owner")

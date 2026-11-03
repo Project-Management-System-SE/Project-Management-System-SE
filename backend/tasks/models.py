@@ -156,6 +156,70 @@ class Task(models.Model):
         return f"{self.title} ({self.project.name})"
 
 
+class TaskComment(models.Model):
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.RESTRICT,
+        related_name="task_comments",
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+
+    def __str__(self):
+        return f"Comment by {self.author} on {self.task}"
+
+
+class TaskDueReminder(models.Model):
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="due_reminders",
+    )
+    due_date = models.DateField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "due_date"],
+                name="unique_task_due_date_reminder",
+            )
+        ]
+
+    def __str__(self):
+        return f"Due reminder for {self.task} on {self.due_date}"
+
+
+class UserNotification(models.Model):
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+
+    @property
+    def is_read(self):
+        return self.read_at is not None
+
+    def __str__(self):
+        return f"{self.title} for {self.recipient}"
+
+
 @receiver(m2m_changed, sender=Task.labels.through)
 def validate_task_label_project(sender, instance, action, pk_set, **kwargs):
     if action != "pre_add" or not pk_set:

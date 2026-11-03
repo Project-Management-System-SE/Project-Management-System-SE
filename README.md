@@ -85,8 +85,13 @@ pip install -r backend/requirements.txt
 
 ### 4. Configure email for password resets
 
-For local development, use Django's console email backend so reset links are printed in the
-development server output instead of requiring an SMTP account.
+For local development, use Django's console email backend so registration confirmation emails and
+password-reset links are printed in the development server output instead of requiring an SMTP
+account.
+
+After login, the session remains active for 30 days without requiring an extra checkbox. The
+browser can offer to save and autofill the email and password using its password manager; the
+application does not store a readable copy of the password.
 
 ```powershell
 # Windows PowerShell
@@ -159,3 +164,15 @@ creation, editing, and project-scoped labels.
 
 Invalid status values are rejected without changing the saved task. Run
 `python backend/manage.py migrate` after pulling changes to apply database migrations.
+
+### Task and membership notifications
+
+The application stores notifications in the signed-in user's **Notifications** inbox when they are
+added to or removed from a project, assigned a task, or notified about a task status change or
+comment. Status and comment notifications go to the task assignee and creator, excluding the
+person who made the change. Task assignees receive one in-app due-date reminder the day before a
+task is due. Registration confirmation and password-reset messages continue to use email.
+
+Run `python backend/manage.py send_due_date_reminders` daily to create due-date reminders. Schedule
+this command with Windows Task Scheduler or a deployment scheduler; the command records sent
+reminders so repeated runs do not create duplicates.

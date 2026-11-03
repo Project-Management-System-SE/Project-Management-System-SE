@@ -2,7 +2,7 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
-from .models import Task, TaskLabel
+from .models import Task, TaskComment, TaskLabel
 
 User = get_user_model()
 
@@ -117,3 +117,12 @@ class TaskForm(forms.ModelForm):
 
 class TaskStatusForm(forms.Form):
     status = forms.ChoiceField(choices=Task.Status.choices)
+
+
+class TaskCommentForm(forms.ModelForm):
+    class Meta:
+        model = TaskComment
+        fields = ["body"]
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 4}),
+        }

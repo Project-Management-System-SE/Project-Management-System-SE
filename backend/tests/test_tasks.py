@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import RestrictedError
 from django.template.loader import render_to_string
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from projects.models import Project, ProjectMembership
@@ -490,6 +490,7 @@ class TaskFormTests(TestCase):
         )
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class TaskViewAndPermissionTests(TestCase):
     def setUp(self):
         self.client = Client()
