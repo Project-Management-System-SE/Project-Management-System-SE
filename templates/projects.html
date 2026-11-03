@@ -22,6 +22,22 @@
 <section class="projects-list-section" aria-labelledby="projects-list-heading">
     <h2 id="projects-list-heading" class="visually-hidden">Project list</h2>
 
+    <form class="card search-filter-form" method="get">
+        <div class="form-field">
+            <label for="{{ search_form.q.id_for_label }}">{{ search_form.q.label }}</label>
+            {{ search_form.q }}
+            {% for error in search_form.q.errors %}
+            <div class="field-errors" role="alert">{{ error }}</div>
+            {% endfor %}
+        </div>
+        <div class="search-filter-actions">
+            <button type="submit">Search</button>
+            {% if search_form.q.value %}
+            <a class="button button-secondary" href="{% url 'projects:project-list' %}">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+
     {% if projects %}
     <ul class="projects-list">
         {% for project in projects %}
@@ -35,7 +51,15 @@
             {% if project.description %}<p>{{ project.description }}</p>{% endif %}
             <div class="project-list-progress">
                 <span>Progress</span>
-                <span class="progress-unavailable" aria-label="Progress unavailable">—</span>
+                {% if project.task_count %}
+                <progress
+                    value="{% widthratio project.completed_task_count project.task_count 100 %}"
+                    max="100"
+                    aria-label="{{ project.name }} task completion"></progress>
+                <span>{% widthratio project.completed_task_count project.task_count 100 %}%</span>
+                {% else %}
+                <span class="progress-unavailable">No tasks yet</span>
+                {% endif %}
             </div>
 
             <p class="project-list-due-date">
@@ -72,4 +96,16 @@
     </div>
     {% endif %}
 </section>
+
+{% if page_obj.has_other_pages %}
+<nav class="pagination-nav" aria-label="Project pages">
+    {% if page_obj.has_previous %}
+    <a class="button button-secondary" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+    {% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a class="button button-secondary" href="?{% if page_query %}{{ page_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+    {% endif %}
+</nav>
+{% endif %}
 {% endblock %}

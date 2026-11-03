@@ -154,6 +154,25 @@ own membership. Deletion requires confirmation and removes the project and its m
 the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
 requests.
 
+Open a project's **Tasks** page to switch between the task list and a status board. Task cards link
+to their details; users with task edit permission can update status and other task fields there.
+The dashboard counts tasks assigned to the signed-in user within visible projects, and project
+progress is the percentage of tasks marked Done. Use **My Tasks** to view those assigned tasks.
+Project and task search supports the currently available fields; sprint and milestone planning is
+available from each project's planning page.
+
+Task attachments are stored below `backend/media` by default (override with `DJANGO_MEDIA_ROOT`)
+and are served only through authenticated, project-authorized downloads. Configure the upload limit
+with `TASK_ATTACHMENT_MAX_SIZE_BYTES` (default 10 MiB) and the comma-separated extension allowlist
+with `TASK_ATTACHMENT_ALLOWED_EXTENSIONS` (default: `pdf,txt,csv,png,jpg,jpeg,gif,doc,docx,xls,xlsx`).
+Uploads must be non-empty, within the size limit, and pass a standard-library signature or structure
+check for the selected extension. This content validation is not malware scanning.
+
+**Issue #19 permission coordination:** collaboration currently follows `can_view_tasks_for`: active
+project members, project owners, and admins may view and add comments or attachments, while task
+editing continues to use the narrower `can_edit_task` rule. Confirm this distinction with the
+issue #19 owner before changing collaboration permissions.
+
 ### Task viewing and status updates
 
 Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view

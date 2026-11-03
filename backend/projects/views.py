@@ -1,6 +1,7 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
@@ -9,11 +10,13 @@ from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config.notifications import create_notifications
+from tasks.models import Task
 
 from .forms import (
     MilestoneForm,
     ProjectForm,
     ProjectMemberForm,
+    ProjectSearchForm,
     ProjectUpdateForm,
     SprintForm,
 )
@@ -25,7 +28,6 @@ from .permissions import (
     manageable_project_ids_for,
     visible_projects_for,
 )
-from tasks.models import Task
 
 
 def _manageable_project_or_403(user, project_id):
@@ -33,6 +35,17 @@ def _manageable_project_or_403(user, project_id):
     if not can_manage_project(user, project):
         raise PermissionDenied
     return project
+
+
+def _projects_with_task_progress(projects):
+    return projects.annotate(
+        task_count=Count("tasks", distinct=True),
+        completed_task_count=Count(
+            "tasks",
+            filter=Q(tasks__status=Task.Status.DONE),
+            distinct=True,
+        ),
+    )
 
 
 @login_required
@@ -391,11 +404,30 @@ def _managed_sprint(user, project_id, sprint_id):
 
 @login_required
 def project_list(request):
-    projects = visible_projects_for(request.user)
+    projects = _projects_with_task_progress(visible_projects_for(request.user))
+    search_form = ProjectSearchForm(request.GET)
+    if search_form.is_valid():
+        query = search_form.cleaned_data["q"]
+        if query:
+            projects = projects.filter(
+                Q(name__icontains=query) | Q(description__icontains=query)
+            )
+    else:
+        projects = projects.none()
+
+    manageable_project_ids = manageable_project_ids_for(request.user, projects)
+    project_parameters = request.GET.copy()
+    project_parameters.pop("page", None)
+    project_query = project_parameters.urlencode()
+    page_obj = Paginator(projects, 20).get_page(request.GET.get("page"))
+
     context = {
-        "projects": projects,
+        "projects": page_obj,
+        "page_obj": page_obj,
+        "page_query": project_query,
+        "search_form": search_form,
         "can_create_project": can_create_project(request.user),
-        "manageable_project_ids": manageable_project_ids_for(request.user, projects),
+        "manageable_project_ids": manageable_project_ids,
     }
     return render(request, "projects.html", context)
 

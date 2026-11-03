@@ -1,12 +1,57 @@
 from django import forms
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
 from projects.models import Milestone, Sprint
 
-from .models import Task, TaskComment, TaskLabel
+from .models import (
+    Task,
+    TaskAttachment,
+    TaskComment,
+    TaskLabel,
+    task_attachment_max_size_label,
+)
 
 User = get_user_model()
+
+
+class TaskFilterForm(forms.Form):
+    q = forms.CharField(
+        required=False,
+        max_length=100,
+        label="Keyword",
+        widget=forms.TextInput(attrs={"placeholder": "Task title or description"}),
+    )
+    assignee = forms.ModelChoiceField(
+        queryset=User.objects.none(),
+        required=False,
+        empty_label="All assignees",
+    )
+    priority = forms.ChoiceField(
+        choices=(("", "All priorities"), *Task.Priority.choices),
+        required=False,
+    )
+    status = forms.ChoiceField(
+        choices=(("", "All statuses"), *Task.Status.choices),
+        required=False,
+    )
+    label = forms.ModelChoiceField(
+        queryset=TaskLabel.objects.none(),
+        required=False,
+        empty_label="All labels",
+    )
+
+    def __init__(self, *args, project, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["assignee"].queryset = (
+            User.objects.filter(
+                Q(project_memberships__project=project) | Q(owned_projects=project)
+            )
+            .distinct()
+            .order_by("full_name", "email")
+        )
+        self.fields["label"].queryset = project.labels.order_by("name")
 
 
 class TaskForm(forms.ModelForm):
@@ -153,7 +198,39 @@ class TaskStatusForm(forms.Form):
 class TaskCommentForm(forms.ModelForm):
     class Meta:
         model = TaskComment
-        fields = ["body"]
+        fields = ["content"]
         widgets = {
-            "body": forms.Textarea(attrs={"rows": 4}),
+            "content": forms.Textarea(
+                attrs={"rows": 4, "placeholder": "Write a comment"}
+            ),
         }
+
+
+class TaskAttachmentForm(forms.ModelForm):
+    file = forms.FileField(
+        error_messages={"empty": "The uploaded file is empty."}
+    )
+
+    class Meta:
+        model = TaskAttachment
+        fields = ["file"]
+        widgets = {
+            "file": forms.ClearableFileInput(
+                attrs={
+                    "accept": ",".join(
+                        f".{extension}"
+                        for extension in settings.TASK_ATTACHMENT_ALLOWED_EXTENSIONS
+                    )
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        allowed_types = ", ".join(
+            f".{extension}" for extension in settings.TASK_ATTACHMENT_ALLOWED_EXTENSIONS
+        )
+        self.fields["file"].help_text = (
+            f"Allowed file types: {allowed_types}. "
+            f"Maximum size: {task_attachment_max_size_label()}."
+        )

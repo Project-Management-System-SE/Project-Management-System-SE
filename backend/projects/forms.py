@@ -5,6 +5,15 @@ from accounts.models import User
 from .models import Milestone, Project, ProjectMembership, Sprint
 
 
+class ProjectSearchForm(forms.Form):
+    q = forms.CharField(
+        required=False,
+        max_length=100,
+        label="Search projects",
+        widget=forms.TextInput(attrs={"placeholder": "Name or description"}),
+    )
+
+
 class ProjectForm(forms.ModelForm):
     ALLOWED_CREATE_STATUSES = (Project.Status.PLANNED, Project.Status.ACTIVE)
 

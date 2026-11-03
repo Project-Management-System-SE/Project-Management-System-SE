@@ -37,8 +37,14 @@
                         </a>
                     </li>
                     <li>
+                        <a class="navigation-item" href="{% url 'tasks:my-tasks' %}"
+                            {% if request.path == "/my-tasks/" %}aria-current="page"{% endif %}>
+                            My Tasks
+                        </a>
+                    </li>
+                    <li>
                         <a class="navigation-item" href="{% url 'tasks:all-task-list' %}"
-                            {% if "/tasks/" in request.path %}aria-current="page"{% endif %}>
+                            {% if request.path == "/tasks/" %}aria-current="page"{% endif %}>
                             Tasks
                         </a>
                     </li>

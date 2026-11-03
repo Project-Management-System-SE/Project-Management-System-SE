@@ -1,7 +1,12 @@
+import logging
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.core.paginator import Paginator
+from django.db import DatabaseError, transaction
+from django.db.models import Q
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -9,14 +14,86 @@ from django.views.decorators.http import require_POST
 
 from projects.permissions import visible_projects_for
 
-from .forms import TaskCommentForm, TaskForm, TaskStatusForm
-from .models import Task, TaskComment, UserNotification
+from .forms import (
+    TaskAttachmentForm,
+    TaskCommentForm,
+    TaskFilterForm,
+    TaskForm,
+    TaskStatusForm,
+)
+from .models import Task, TaskAttachment, TaskComment, UserNotification
 from .notifications import (
     notify_task_assignment,
     notify_task_comment,
     notify_task_status_change,
 )
-from .permissions import can_create_task_in, can_edit_task
+from .permissions import can_create_task_in, can_edit_task, can_view_tasks_for
+
+logger = logging.getLogger(__name__)
+
+
+def _get_visible_task(user, project_id, task_id):
+    task = get_object_or_404(
+        Task.objects.select_related(
+            "project", "assignee", "created_by", "sprint", "milestone"
+        ).prefetch_related("labels"),
+        pk=task_id,
+        project_id=project_id,
+    )
+    if not can_view_tasks_for(user, task.project):
+        raise Http404
+    return task
+
+
+def _task_detail_context(
+    request,
+    task,
+    comment_form=None,
+    attachment_form=None,
+    status_form=None,
+):
+    can_edit = can_edit_task(request.user, task)
+    return {
+        "project": task.project,
+        "task": task,
+        "can_edit_task": can_edit,
+        "can_update_status": can_edit,
+        "status_form": (
+            status_form
+            if status_form is not None
+            else TaskStatusForm(initial={"status": task.status})
+        ),
+        "comments": task.comments.select_related("author").order_by("created_at", "pk"),
+        "attachments": task.attachments.select_related("uploaded_by").order_by(
+            "created_at", "pk"
+        ),
+        "comment_form": comment_form if comment_form is not None else TaskCommentForm(),
+        "attachment_form": (
+            attachment_form
+            if attachment_form is not None
+            else TaskAttachmentForm()
+        ),
+    }
+
+
+def _render_task_detail(
+    request,
+    task,
+    comment_form=None,
+    attachment_form=None,
+    status_form=None,
+):
+    return render(
+        request,
+        "task_detail.html",
+        _task_detail_context(
+            request,
+            task,
+            comment_form,
+            attachment_form,
+            status_form,
+        ),
+    )
 
 
 @login_required
@@ -27,16 +104,57 @@ def task_list(request, project_id):
         .prefetch_related("labels")
         .order_by("-created_at")
     )
+    view_mode = "board" if request.GET.get("view") == "board" else "list"
+    filter_form = TaskFilterForm(request.GET, project=project)
+    if filter_form.is_valid():
+        filters = filter_form.cleaned_data
+        if filters["q"]:
+            tasks = tasks.filter(
+                Q(title__icontains=filters["q"])
+                | Q(description__icontains=filters["q"])
+            )
+        if filters["assignee"]:
+            tasks = tasks.filter(assignee=filters["assignee"])
+        if filters["priority"]:
+            tasks = tasks.filter(priority=filters["priority"])
+        if filters["status"]:
+            tasks = tasks.filter(status=filters["status"])
+        if filters["label"]:
+            tasks = tasks.filter(labels=filters["label"])
+    else:
+        tasks = tasks.none()
 
-    return render(
-        request,
-        "task_list.html",
-        {
-            "project": project,
-            "tasks": tasks,
-            "can_create_task": can_create_task_in(request.user, project),
-        },
-    )
+    filter_parameters = request.GET.copy()
+    filter_parameters.pop("view", None)
+    filter_parameters.pop("page", None)
+    filter_query = filter_parameters.urlencode()
+    task_columns = []
+    page_obj = None
+    if view_mode == "board":
+        task_items = list(tasks)
+        task_columns = [
+            {
+                "status": status,
+                "label": label,
+                "tasks": [task for task in task_items if task.status == status],
+            }
+            for status, label in Task.Status.choices
+        ]
+    else:
+        page_obj = Paginator(tasks, 20).get_page(request.GET.get("page"))
+        tasks = page_obj.object_list
+
+    context = {
+        "project": project,
+        "tasks": tasks,
+        "view_mode": view_mode,
+        "task_columns": task_columns,
+        "filter_form": filter_form,
+        "filter_query": filter_query,
+        "page_obj": page_obj,
+        "can_create_task": can_create_task_in(request.user, project),
+    }
+    return render(request, "task_list.html", context)
 
 
 @login_required
@@ -48,6 +166,20 @@ def all_task_list(request):
         .prefetch_related("labels")
     )
     return render(request, "tasks/task_list.html", {"tasks": tasks})
+
+
+@login_required
+def my_tasks(request):
+    tasks = (
+        Task.objects.filter(
+            project__in=visible_projects_for(request.user),
+            assignee=request.user,
+        )
+        .select_related("project", "assignee", "created_by")
+        .prefetch_related("labels")
+        .order_by("due_date", "-created_at")
+    )
+    return render(request, "my_tasks.html", {"tasks": tasks})
 
 
 @login_required
@@ -94,28 +226,89 @@ def task_create(request, project_id):
 
 @login_required
 def task_detail(request, project_id, task_id):
-    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
-    task = get_object_or_404(
-        project.tasks.select_related(
-            "assignee", "created_by", "project", "sprint", "milestone"
-        ).prefetch_related("labels"),
-        pk=task_id,
-    )
-    can_edit = can_edit_task(request.user, task)
+    task = _get_visible_task(request.user, project_id, task_id)
+    return _render_task_detail(request, task)
 
-    return render(
-        request,
-        "task_detail.html",
-        {
-            "project": project,
-            "task": task,
-            "can_edit_task": can_edit,
-            "can_update_status": can_edit,
-            "status_form": TaskStatusForm(initial={"status": task.status}),
-            "comments": task.comments.select_related("author"),
-            "comment_form": TaskCommentForm(),
-        },
+
+@login_required
+def task_comment_create(request, project_id, task_id):
+    task = _get_visible_task(request.user, project_id, task_id)
+    if request.method != "POST":
+        return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
+
+    form = TaskCommentForm(request.POST)
+    if form.is_valid():
+        comment = form.save(commit=False)
+        comment.task = task
+        comment.author = request.user
+        try:
+            with transaction.atomic():
+                comment.save()
+                notify_task_comment(task, comment)
+        except DatabaseError:
+            logger.exception("Could not save comment for task %s", task.pk)
+            form.add_error(None, "Could not save your comment. Please try again.")
+        else:
+            messages.success(request, "Comment added.")
+            return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
+
+    return _render_task_detail(request, task, comment_form=form)
+
+
+task_add_comment = task_comment_create
+
+
+@login_required
+def task_attachment_upload(request, project_id, task_id):
+    task = _get_visible_task(request.user, project_id, task_id)
+    if request.method != "POST":
+        return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
+
+    form = TaskAttachmentForm(request.POST, request.FILES)
+    if form.is_valid():
+        attachment = form.save(commit=False)
+        attachment.task = task
+        attachment.uploaded_by = request.user
+        attachment.original_filename = form.cleaned_data["file"].name
+        original_file_name = attachment.file.name
+        try:
+            with transaction.atomic():
+                attachment.save()
+        except (DatabaseError, OSError):
+            logger.exception("Could not save attachment for task %s", task.pk)
+            if attachment.file.name != original_file_name:
+                try:
+                    attachment.file.delete(save=False)
+                except OSError:
+                    logger.exception(
+                        "Could not clean up attachment file for task %s", task.pk
+                    )
+            form.add_error(None, "Could not save the attachment. Please try again.")
+        else:
+            messages.success(request, "Attachment uploaded.")
+            return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
+
+    return _render_task_detail(request, task, attachment_form=form)
+
+
+@login_required
+def task_attachment_download(request, project_id, task_id, attachment_id):
+    task = _get_visible_task(request.user, project_id, task_id)
+    attachment = get_object_or_404(task.attachments, pk=attachment_id)
+    try:
+        attachment_file = attachment.file.open("rb")
+    except OSError:
+        logger.exception("Could not open attachment %s for task %s", attachment.pk, task.pk)
+        raise Http404("The requested attachment is unavailable.") from None
+
+    response = FileResponse(
+        attachment_file,
+        as_attachment=True,
+        filename=attachment.original_filename,
+        content_type="application/octet-stream",
     )
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @login_required
@@ -193,55 +386,7 @@ def task_update_status(request, project_id, task_id):
     return render(
         request,
         "task_detail.html",
-        {
-            "project": project,
-            "task": task,
-            "can_edit_task": True,
-            "can_update_status": True,
-            "status_form": status_form,
-            "comments": task.comments.select_related("author"),
-            "comment_form": TaskCommentForm(),
-        },
-        status=400,
-    )
-
-
-@login_required
-@require_POST
-def task_add_comment(request, project_id, task_id):
-    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
-    task = get_object_or_404(
-        project.tasks.select_related("assignee", "created_by", "project"),
-        pk=task_id,
-    )
-    form = TaskCommentForm(request.POST)
-
-    if form.is_valid():
-        with transaction.atomic():
-            comment = form.save(commit=False)
-            comment.task = task
-            comment.author = request.user
-            comment.save()
-            notify_task_comment(task, comment)
-        messages.success(request, "Comment added.")
-        return redirect(
-            "tasks:task-detail",
-            project_id=project.pk,
-            task_id=task.pk,
-        )
-
-    return render(
-        request,
-        "task_detail.html",
-        {
-            "project": project,
-            "task": task,
-            "can_edit_task": can_edit_task(request.user, task),
-            "can_update_status": can_edit_task(request.user, task),
-            "status_form": TaskStatusForm(initial={"status": task.status}),
-            "comments": task.comments.select_related("author"),
-            "comment_form": form,
-        },
+        _task_detail_context(request, task, status_form=status_form),
         status=400,
     )
 
