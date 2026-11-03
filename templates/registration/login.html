@@ -13,7 +13,7 @@
     <p>Use the email address and password for your PMS account.</p>
 </section>
 
-<form class="card project-form auth-form" method="post">
+<form class="card project-form auth-form" method="post" autocomplete="on">
     {% csrf_token %}
 
     {% if form.non_field_errors %}

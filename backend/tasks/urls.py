@@ -5,6 +5,12 @@ from . import views
 app_name = "tasks"
 
 urlpatterns = [
+    path("notifications/", views.notification_inbox, name="notification-inbox"),
+    path(
+        "notifications/<int:notification_id>/read/",
+        views.notification_mark_read,
+        name="notification-mark-read",
+    ),
     path("tasks/", views.all_task_list, name="all-task-list"),
     path(
         "projects/<int:project_id>/tasks/",
@@ -35,5 +41,10 @@ urlpatterns = [
         "projects/<int:project_id>/tasks/<int:task_id>/status/",
         views.task_update_status,
         name="task-update-status",
+    ),
+    path(
+        "projects/<int:project_id>/tasks/<int:task_id>/comments/",
+        views.task_add_comment,
+        name="task-add-comment",
     ),
 ]

@@ -6,6 +6,8 @@ from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
+from config.notifications import create_notifications
+
 from .forms import ProjectForm, ProjectMemberForm, ProjectUpdateForm
 from .models import Project, ProjectMembership
 from .permissions import (
@@ -199,10 +201,18 @@ def project_add_member(request, project_id):
         try:
             with transaction.atomic():
                 ensure_project_owner_membership(project)
-                ProjectMembership.objects.create(
+                membership = ProjectMembership.objects.create(
                     project=project,
                     user=form.cleaned_data["user"],
                     project_role=form.cleaned_data["project_role"],
+                )
+                create_notifications(
+                    title=f"Added to project: {project.name}",
+                    message=(
+                        f"You have been added to the project '{project.name}' "
+                        f"as a {membership.get_project_role_display()}."
+                    ),
+                    recipients=[membership.user],
                 )
         except IntegrityError:
             form.add_error("user", "This user is already a project member.")
@@ -244,7 +254,17 @@ def project_remove_member(request, project_id, membership_id):
 
     with transaction.atomic():
         ensure_project_owner_membership(project)
+        affected_user = membership.user
+        removed_role = membership.get_project_role_display()
         membership.delete()
+        create_notifications(
+            title=f"Removed from project: {project.name}",
+            message=(
+                f"Your {removed_role} membership in the project "
+                f"'{project.name}' has been removed."
+            ),
+            recipients=[affected_user],
+        )
 
     messages.success(request, "Project member removed successfully.")
     return redirect("projects:project-detail", project_id=project.pk)

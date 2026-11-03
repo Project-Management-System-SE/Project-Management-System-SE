@@ -82,4 +82,34 @@
     </form>
 </section>
 {% endif %}
+
+<section class="card project-form" id="task-comments" aria-labelledby="task-comments-heading">
+    <h2 id="task-comments-heading">Comments</h2>
+    <div class="task-comments-list">
+        {% for comment in comments %}
+        <article class="task-comment">
+            <p class="task-comment-meta">
+                <strong>{{ comment.author.full_name|default:comment.author.email }}</strong>
+                <time datetime="{{ comment.created_at|date:'c' }}">{{ comment.created_at|date:"M j, Y H:i" }}</time>
+            </p>
+            <p>{{ comment.body|linebreaksbr }}</p>
+        </article>
+        {% empty %}
+        <p>No comments yet.</p>
+        {% endfor %}
+    </div>
+    <form method="post" action="{% url 'tasks:task-add-comment' project.pk task.pk %}">
+        {% csrf_token %}
+        <div class="form-field">
+            <label for="{{ comment_form.body.id_for_label }}">Add a comment</label>
+            {{ comment_form.body }}
+            {% if comment_form.body.errors %}
+            <div class="field-errors" role="alert">{{ comment_form.body.errors }}</div>
+            {% endif %}
+        </div>
+        <div class="project-form-actions">
+            <button type="submit">Post comment</button>
+        </div>
+    </form>
+</section>
 {% endblock %}

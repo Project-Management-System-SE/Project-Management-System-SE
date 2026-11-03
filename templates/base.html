@@ -55,6 +55,14 @@
                 </div>
                 <div class="topbar-actions">
                     {% if user.is_authenticated %}
+                    <a class="button button-secondary notification-link" href="{% url 'tasks:notification-inbox' %}">
+                        Notifications
+                        {% if unread_notification_count %}
+                        <span class="notification-count" aria-label="{{ unread_notification_count }} unread">
+                            {{ unread_notification_count }}
+                        </span>
+                        {% endif %}
+                    </a>
                     <div class="account-chip">
                         <span class="account-avatar" aria-hidden="true">
                             {{ user.full_name|default:user.email|slice:":1"|upper }}
