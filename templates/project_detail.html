@@ -14,6 +14,7 @@
     </div>
     <div class="project-form-actions">
         <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}">View tasks</a>
+        <a class="button button-secondary" href="{% url 'projects:sprint-list' project.pk %}">Planning</a>
         {% if can_manage_project %}
         <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create task</a>
         <a class="button button-secondary" href="{% url 'projects:project-update' project.pk %}">Edit project</a>

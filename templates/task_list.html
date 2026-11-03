@@ -37,6 +37,7 @@
             <span><span class="task-meta-label">Due date</span><strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
             <span><span class="task-meta-label">Estimate</span><strong>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
             <span><span class="task-meta-label">Actual</span><strong>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
+            <span><span class="task-meta-label">Sprint</span><strong>{% if task.sprint %}{{ task.sprint.name }}{% else %}Backlog{% endif %}</strong></span>
         </div>
         {% if task.labels.all %}
         <div class="task-labels-list">

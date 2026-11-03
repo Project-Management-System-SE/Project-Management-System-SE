@@ -55,6 +55,20 @@ class Task(models.Model):
         on_delete=models.CASCADE,
         related_name="tasks",
     )
+    sprint = models.ForeignKey(
+        "projects.Sprint",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
+    milestone = models.ForeignKey(
+        "projects.Milestone",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
     title = models.CharField(max_length=250)
     description = models.TextField(blank=True)
     priority = models.CharField(
@@ -138,6 +152,14 @@ class Task(models.Model):
                 fields=["project", "-created_at"],
                 name="task_project_created_idx",
             ),
+            models.Index(
+                fields=["project", "sprint", "status"],
+                name="task_project_sprint_status_idx",
+            ),
+            models.Index(
+                fields=["project", "milestone"],
+                name="task_project_milestone_idx",
+            ),
         ]
 
     def clean(self):
@@ -153,6 +175,12 @@ class Task(models.Model):
                 raise ValidationError(
                     {"assignee": "The assignee must be an authorized member of the project."}
                 )
+        if self.sprint_id and self.project_id and self.sprint.project_id != self.project_id:
+            raise ValidationError({"sprint": "The sprint must belong to the task's project."})
+        if self.milestone_id and self.project_id and self.milestone.project_id != self.project_id:
+            raise ValidationError(
+                {"milestone": "The milestone must belong to the task's project."}
+            )
 
     def save(self, *args, **kwargs):
         if self.title:

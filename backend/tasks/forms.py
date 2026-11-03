@@ -2,6 +2,8 @@ from django import forms
 from django.contrib.auth import get_user_model
 from django.db.models import Q
 
+from projects.models import Milestone, Sprint
+
 from .models import Task, TaskComment, TaskLabel
 
 User = get_user_model()
@@ -43,6 +45,8 @@ class TaskForm(forms.ModelForm):
             "due_date",
             "estimated_effort",
             "actual_effort",
+            "sprint",
+            "milestone",
             "assignee",
             "status",
         ]
@@ -70,9 +74,16 @@ class TaskForm(forms.ModelForm):
             ).distinct().order_by("full_name", "email")
             self.fields["assignee"].queryset = eligible_users
             self.fields["assignee"].empty_label = "Unassigned"
+            self.fields["sprint"].queryset = self.project.sprints.exclude(
+                status=Sprint.Status.COMPLETED
+            )
+            self.fields["sprint"].empty_label = "Project backlog"
+            self.fields["milestone"].queryset = self.project.milestones.all()
         else:
             self.fields["assignee"].queryset = User.objects.none()
             self.fields["assignee"].empty_label = "Unassigned"
+            self.fields["sprint"].queryset = Sprint.objects.none()
+            self.fields["milestone"].queryset = Milestone.objects.none()
 
     def clean_labels(self):
         raw_labels = self.cleaned_data.get("labels", "")

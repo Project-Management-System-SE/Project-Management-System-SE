@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sprint.name }} | PMS{% endblock %}
+{% block page_heading %}<h1>{{ sprint.name }}</h1>{% endblock %}
+
+{% block content %}
+<section class="projects-intro">
+    <div>
+        <h2>{{ project.name }}</h2>
+        <p><span class="status status-neutral">{{ sprint.get_status_display }}</span>
+            {{ sprint.start_date|date:"M j, Y" }} - {{ sprint.end_date|date:"M j, Y" }}</p>
+        {% if sprint.goal %}<p>{{ sprint.goal }}</p>{% endif %}
+    </div>
+    {% if can_manage %}
+    <div class="project-form-actions">
+        {% if sprint.status == "PLANNED" %}
+        <form method="post" action="{% url 'projects:sprint-activate' project.pk sprint.pk %}">
+            {% csrf_token %}<button type="submit">Activate sprint</button>
+        </form>
+        {% endif %}
+        {% if sprint.status == "ACTIVE" %}
+        <a class="button" href="{% url 'projects:sprint-update' project.pk sprint.pk %}">Edit sprint</a>
+        {% endif %}
+        {% if sprint.status == "ACTIVE" %}
+        <form method="post" action="{% url 'projects:sprint-close' project.pk sprint.pk %}">
+            {% csrf_token %}
+            <label for="carry-over-sprint">Carry incomplete tasks to</label>
+            <select id="carry-over-sprint" name="carry_over_sprint">
+                <option value="">Project backlog</option>
+                {% for candidate in project.sprints.all %}
+                {% if candidate.pk != sprint.pk and candidate.status != "COMPLETED" %}
+                <option value="{{ candidate.pk }}">{{ candidate.name }}</option>
+                {% endif %}
+                {% endfor %}
+            </select>
+            <button type="submit">Close sprint</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+
+<section class="card" aria-labelledby="sprint-tasks-heading">
+    <h2 id="sprint-tasks-heading">Sprint tasks</h2>
+    <ul class="projects-list">
+        {% for task in tasks %}
+        <li class="project-list-card">
+            <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
+            <p><span class="status status-neutral">{{ task.get_status_display }}</span>
+                {{ task.get_priority_display }} priority</p>
+        </li>
+        {% empty %}<li>No tasks are assigned to this sprint.</li>{% endfor %}
+    </ul>
+</section>
+<p><a href="{% url 'projects:sprint-list' project.pk %}">Back to planning</a></p>
+{% endblock %}

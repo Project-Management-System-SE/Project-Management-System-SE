@@ -23,7 +23,7 @@ from .permissions import can_create_task_in, can_edit_task
 def task_list(request, project_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     tasks = (
-        project.tasks.select_related("assignee", "created_by")
+        project.tasks.select_related("assignee", "created_by", "sprint", "milestone")
         .prefetch_related("labels")
         .order_by("-created_at")
     )
@@ -44,7 +44,7 @@ def all_task_list(request):
     projects = visible_projects_for(request.user)
     tasks = (
         Task.objects.filter(project__in=projects)
-        .select_related("project", "assignee", "created_by")
+        .select_related("project", "assignee", "created_by", "sprint", "milestone")
         .prefetch_related("labels")
     )
     return render(request, "tasks/task_list.html", {"tasks": tasks})
@@ -96,7 +96,9 @@ def task_create(request, project_id):
 def task_detail(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(
-        project.tasks.select_related("assignee", "created_by", "project").prefetch_related("labels"),
+        project.tasks.select_related(
+            "assignee", "created_by", "project", "sprint", "milestone"
+        ).prefetch_related("labels"),
         pk=task_id,
     )
     can_edit = can_edit_task(request.user, task)
@@ -120,7 +122,9 @@ def task_detail(request, project_id, task_id):
 def task_update(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(
-        project.tasks.select_related("assignee", "created_by", "project").prefetch_related("labels"),
+        project.tasks.select_related(
+            "assignee", "created_by", "project", "sprint", "milestone"
+        ).prefetch_related("labels"),
         pk=task_id,
     )
     if not can_edit_task(request.user, task):

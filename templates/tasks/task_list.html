@@ -46,6 +46,10 @@
             <strong>Actual effort:</strong>
             {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }} hours{% else %}Not set{% endif %}
         </p>
+        <p>
+            <strong>Sprint:</strong>
+            {% if task.sprint %}{{ task.sprint.name }}{% else %}Backlog{% endif %}
+        </p>
     </li>
     {% endfor %}
 </ul>

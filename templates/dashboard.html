@@ -80,6 +80,15 @@
                     &middot;
                     Actual: {{ project.total_actual_effort|floatformat:2 }} hours
                 </p>
+                <p><a href="{% url 'projects:sprint-list' project.pk %}">View sprint and milestone planning</a></p>
+                {% if project.active_sprint %}
+                <p>
+                    <strong>Active sprint:</strong> {{ project.active_sprint.name }}
+                    ({{ project.active_sprint.task_count }} task{{ project.active_sprint.task_count|pluralize }},
+                    {{ project.active_sprint.estimated_effort|floatformat:2 }} estimated /
+                    {{ project.active_sprint.actual_effort|floatformat:2 }} actual hours)
+                </p>
+                {% endif %}
                 <ul class="status-breakdown" aria-label="Task status breakdown">
                     {% for status in project.status_breakdown %}
                     <li><span>{{ status.label }}</span><strong>{{ status.count }}</strong></li>

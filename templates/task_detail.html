@@ -51,6 +51,14 @@
             <p>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }} hours{% else %}Not set{% endif %}</p>
         </div>
         <div>
+            <strong>Sprint:</strong>
+            <p>{% if task.sprint %}<a href="{% url 'projects:sprint-detail' project.pk task.sprint.pk %}">{{ task.sprint.name }}</a>{% else %}Backlog{% endif %}</p>
+        </div>
+        <div>
+            <strong>Milestone:</strong>
+            <p>{% if task.milestone %}{{ task.milestone.name }}{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
             <strong>Created by:</strong>
             <p>{{ task.created_by.full_name|default:task.created_by.email }}</p>
         </div>
