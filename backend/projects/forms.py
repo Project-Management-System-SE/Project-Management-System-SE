@@ -177,3 +177,27 @@ class ProjectWorkflowConfigForm(forms.Form):
                 to_status=to_s,
                 defaults={"is_allowed": allowed},
             )
+
+
+class ProjectReportFilterForm(forms.Form):
+    start_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        label="Start date",
+    )
+    end_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        label="End date",
+    )
+    sprint = forms.ModelChoiceField(
+        queryset=Sprint.objects.none(),
+        required=False,
+        empty_label="All sprints",
+        label="Sprint",
+    )
+
+    def __init__(self, *args, project=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if project:
+            self.fields["sprint"].queryset = project.sprints.all()

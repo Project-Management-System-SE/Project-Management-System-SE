@@ -729,3 +729,46 @@ def project_workflow_settings(request, project_id):
         "project_workflow_settings.html",
         {"project": project, "form": form, "can_manage_project": True},
     )
+
+
+@login_required
+def project_reports(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    from .forms import ProjectReportFilterForm
+    from .reports import (
+        get_project_progress_metrics,
+        get_sprint_velocity_metrics,
+        get_team_workload_metrics,
+    )
+
+    filter_form = ProjectReportFilterForm(request.GET, project=project)
+    start_date = None
+    end_date = None
+    selected_sprint = None
+    if filter_form.is_valid():
+        start_date = filter_form.cleaned_data.get("start_date")
+        end_date = filter_form.cleaned_data.get("end_date")
+        selected_sprint = filter_form.cleaned_data.get("sprint")
+
+    progress = get_project_progress_metrics(
+        project,
+        start_date=start_date,
+        end_date=end_date,
+        sprint=selected_sprint,
+    )
+    velocity = get_sprint_velocity_metrics(project)
+    workload = get_team_workload_metrics(project)
+
+    return render(
+        request,
+        "project_reports.html",
+        {
+            "project": project,
+            "filter_form": filter_form,
+            "progress": progress,
+            "velocity": velocity,
+            "workload": workload,
+            "selected_sprint": selected_sprint,
+            "can_manage_project": can_manage_project(request.user, project),
+        },
+    )
