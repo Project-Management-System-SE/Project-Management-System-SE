@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Backlog | {{ project.name }} | PMS{% endblock %}
+{% block page_heading %}<h1>{{ project.name }} backlog</h1>{% endblock %}
+
+{% block content %}
+<section class="projects-intro">
+    <div>
+        <h2>Project backlog</h2>
+        <p>Tasks without a sprint remain available for future planning.</p>
+    </div>
+</section>
+<section class="card" aria-labelledby="backlog-heading">
+    <h2 id="backlog-heading">Unassigned sprint tasks</h2>
+    <ul class="projects-list">
+        {% for task in tasks %}
+        <li class="project-list-card">
+            <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
+            <p>{{ task.get_status_display }} | {{ task.get_priority_display }} priority</p>
+        </li>
+        {% empty %}<li>No tasks are currently in the project backlog.</li>{% endfor %}
+    </ul>
+</section>
+<p><a href="{% url 'projects:sprint-list' project.pk %}">Back to planning</a></p>
+{% endblock %}

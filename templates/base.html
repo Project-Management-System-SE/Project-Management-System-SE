@@ -14,15 +14,40 @@
     <div class="app-shell">
         <aside class="sidebar" aria-label="Application sidebar">
             <div class="brand">
-                <span class="brand-name">PMS</span>
-                <span class="brand-description">Project Management System</span>
+                <span class="brand-mark" aria-hidden="true">P</span>
+                <span>
+                    <span class="brand-name">Project space</span>
+                    <span class="brand-description">Management workspace</span>
+                </span>
             </div>
 
             <nav class="primary-navigation" aria-label="Primary navigation">
+                <p class="navigation-label">Workspace</p>
                 <ul>
-                    <li><a class="navigation-item" href="{% url 'projects:dashboard' %}">Dashboard</a></li>
-                    <li><a class="navigation-item" href="{% url 'projects:project-list' %}">Projects</a></li>
-                    <li><a class="navigation-item" href="{% url 'tasks:my-tasks' %}">My Tasks</a></li>
+                    <li>
+                        <a class="navigation-item" href="{% url 'projects:dashboard' %}"
+                            {% if request.path == "/" or request.path == "/dashboard/" %}aria-current="page"{% endif %}>
+                            Dashboard
+                        </a>
+                    </li>
+                    <li>
+                        <a class="navigation-item" href="{% url 'projects:project-list' %}"
+                            {% if "/projects/" in request.path %}aria-current="page"{% endif %}>
+                            Projects
+                        </a>
+                    </li>
+                    <li>
+                        <a class="navigation-item" href="{% url 'tasks:my-tasks' %}"
+                            {% if request.path == "/my-tasks/" %}aria-current="page"{% endif %}>
+                            My Tasks
+                        </a>
+                    </li>
+                    <li>
+                        <a class="navigation-item" href="{% url 'tasks:all-task-list' %}"
+                            {% if request.path == "/tasks/" %}aria-current="page"{% endif %}>
+                            Tasks
+                        </a>
+                    </li>
                 </ul>
             </nav>
         </aside>
@@ -36,7 +61,20 @@
                 </div>
                 <div class="topbar-actions">
                     {% if user.is_authenticated %}
-                    <span>{{ user.full_name|default:user.email }}</span>
+                    <a class="button button-secondary notification-link" href="{% url 'tasks:notification-inbox' %}">
+                        Notifications
+                        {% if unread_notification_count %}
+                        <span class="notification-count" aria-label="{{ unread_notification_count }} unread">
+                            {{ unread_notification_count }}
+                        </span>
+                        {% endif %}
+                    </a>
+                    <div class="account-chip">
+                        <span class="account-avatar" aria-hidden="true">
+                            {{ user.full_name|default:user.email|slice:":1"|upper }}
+                        </span>
+                        <span class="account-name">{{ user.full_name|default:user.email }}</span>
+                    </div>
                     <form method="post" action="{% url 'logout' %}">
                         {% csrf_token %}
                         <button class="button button-secondary" type="submit">Log out</button>

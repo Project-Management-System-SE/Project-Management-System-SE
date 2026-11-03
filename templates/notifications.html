@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Notifications</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="notifications-heading">
+    <div>
+        <h2 id="notifications-heading">Your notifications</h2>
+        <p>
+            {% if unread_count %}
+            You have {{ unread_count }} unread notification{{ unread_count|pluralize }}.
+            {% else %}
+            You are all caught up.
+            {% endif %}
+        </p>
+    </div>
+</section>
+
+<section class="notification-list" aria-label="Notification history">
+    {% for notification in notifications %}
+    <article class="card notification-card{% if not notification.is_read %} notification-unread{% endif %}">
+        <div class="notification-card-content">
+            <h3>{{ notification.title }}</h3>
+            <p>{{ notification.message }}</p>
+            <time datetime="{{ notification.created_at|date:'c' }}">
+                {{ notification.created_at|date:"M j, Y H:i" }}
+            </time>
+        </div>
+        {% if not notification.is_read %}
+        <form method="post" action="{% url 'tasks:notification-mark-read' notification.pk %}">
+            {% csrf_token %}
+            <button class="button button-secondary" type="submit">Mark as read</button>
+        </form>
+        {% else %}
+        <span class="notification-read-label">Read</span>
+        {% endif %}
+    </article>
+    {% empty %}
+    <div class="card projects-empty-state">
+        <h3>No notifications yet</h3>
+        <p>Updates about your projects and tasks will appear here.</p>
+    </div>
+    {% endfor %}
+</section>
+{% endblock %}

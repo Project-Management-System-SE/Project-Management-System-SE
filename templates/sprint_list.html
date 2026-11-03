@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Planning | {{ project.name }} | PMS{% endblock %}
+
+{% block page_heading %}<h1>{{ project.name }} planning</h1>{% endblock %}
+
+{% block content %}
+<section class="projects-intro">
+    <div>
+        <h2>Sprints and milestones</h2>
+        <p>Plan sprint work and track milestone progress.</p>
+    </div>
+    {% if can_manage %}
+    <div class="project-form-actions">
+        <a class="button" href="{% url 'projects:sprint-create' project.pk %}">Create sprint</a>
+        <a class="button button-secondary" href="{% url 'projects:milestone-create' project.pk %}">Create milestone</a>
+    </div>
+    {% endif %}
+</section>
+
+<section class="card" aria-labelledby="sprints-heading">
+    <h2 id="sprints-heading">Sprints</h2>
+    {% for sprint in sprints %}
+    <article class="planning-item">
+        <h3><a href="{% url 'projects:sprint-detail' project.pk sprint.pk %}">{{ sprint.name }}</a></h3>
+        <p><span class="status status-neutral">{{ sprint.get_status_display }}</span>
+            {{ sprint.start_date|date:"M j, Y" }} - {{ sprint.end_date|date:"M j, Y" }}</p>
+        <p>{{ sprint.task_count }} task{{ sprint.task_count|pluralize }} |
+            Estimated: {{ sprint.estimated_effort|floatformat:2 }} hours |
+            Actual: {{ sprint.actual_effort|floatformat:2 }} hours</p>
+    </article>
+    {% empty %}<p>No sprints have been created.</p>{% endfor %}
+</section>
+
+<section class="card" aria-labelledby="milestones-heading">
+    <h2 id="milestones-heading">Milestones</h2>
+    {% for milestone in milestones %}
+    <article class="planning-item">
+        <h3>{{ milestone.name }}</h3>
+        <p><span class="status status-neutral">{{ milestone.get_status_display }}</span>
+            {% if milestone.target_date %}Target: {{ milestone.target_date|date:"M j, Y" }}{% else %}No target date{% endif %}</p>
+        <p>{{ milestone.completed_task_count }} of {{ milestone.task_count }} tasks completed
+            ({{ milestone.completion_percentage }}%)</p>
+        {% if can_manage %}<a href="{% url 'projects:milestone-update' project.pk milestone.pk %}">Edit milestone</a>{% endif %}
+    </article>
+    {% empty %}<p>No milestones have been created.</p>{% endfor %}
+</section>
+
+<p>
+    <a href="{% url 'projects:project-detail' project.pk %}">Back to project</a> |
+    <a href="{% url 'projects:project-backlog' project.pk %}">View project backlog</a>
+</p>
+{% endblock %}

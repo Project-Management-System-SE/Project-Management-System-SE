@@ -1,8 +1,9 @@
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
 from django.db.models import Q
+
+from projects.models import Milestone, Sprint
 
 from .models import (
     Task,
@@ -54,6 +55,24 @@ class TaskFilterForm(forms.Form):
 
 
 class TaskForm(forms.ModelForm):
+    estimated_effort = forms.DecimalField(
+        required=False,
+        max_digits=7,
+        decimal_places=2,
+        min_value=0,
+        label="Estimated effort (hours)",
+        help_text="Optional decimal hours, such as 2.50 for two and a half hours.",
+        widget=forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+    )
+    actual_effort = forms.DecimalField(
+        required=False,
+        max_digits=7,
+        decimal_places=2,
+        min_value=0,
+        label="Actual effort (hours)",
+        help_text="Optional decimal hours recorded for work completed.",
+        widget=forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+    )
     labels = forms.CharField(
         required=False,
         help_text="Comma-separated labels (e.g. bug, frontend, urgent).",
@@ -69,6 +88,10 @@ class TaskForm(forms.ModelForm):
             "description",
             "priority",
             "due_date",
+            "estimated_effort",
+            "actual_effort",
+            "sprint",
+            "milestone",
             "assignee",
             "status",
         ]
@@ -96,16 +119,23 @@ class TaskForm(forms.ModelForm):
             ).distinct().order_by("full_name", "email")
             self.fields["assignee"].queryset = eligible_users
             self.fields["assignee"].empty_label = "Unassigned"
+            self.fields["sprint"].queryset = self.project.sprints.exclude(
+                status=Sprint.Status.COMPLETED
+            )
+            self.fields["sprint"].empty_label = "Project backlog"
+            self.fields["milestone"].queryset = self.project.milestones.all()
         else:
             self.fields["assignee"].queryset = User.objects.none()
             self.fields["assignee"].empty_label = "Unassigned"
+            self.fields["sprint"].queryset = Sprint.objects.none()
+            self.fields["milestone"].queryset = Milestone.objects.none()
 
     def clean_labels(self):
         raw_labels = self.cleaned_data.get("labels", "")
         if not raw_labels:
             return []
 
-        tokens = [t.strip().lower() for t in raw_labels.split(",")]
+        tokens = [token.strip().lower() for token in raw_labels.split(",")]
         cleaned_tokens = []
         seen = set()
 
@@ -121,9 +151,7 @@ class TaskForm(forms.ModelForm):
                 cleaned_tokens.append(token)
 
         if len(cleaned_tokens) > 10:
-            raise forms.ValidationError(
-                "A task cannot have more than 10 labels."
-            )
+            raise forms.ValidationError("A task cannot have more than 10 labels.")
 
         return cleaned_tokens
 
@@ -147,27 +175,24 @@ class TaskForm(forms.ModelForm):
         if self.project and not getattr(task, "project_id", None):
             task.project = self.project
 
-        def save_m2m():
-            self._save_labels(task)
-
         if commit:
             task.save()
-            save_m2m()
+            self._save_labels(task)
         else:
-            self.save_m2m = save_m2m
-
+            self.save_m2m = lambda: self._save_labels(task)
         return task
 
     def _save_labels(self, task):
         cleaned_labels = self.cleaned_data.get("labels", [])
-        label_objs = []
-        for name in cleaned_labels:
-            label_obj, _ = TaskLabel.objects.get_or_create(
-                project=task.project,
-                name=name,
-            )
-            label_objs.append(label_obj)
-        task.labels.set(label_objs)
+        label_objects = [
+            TaskLabel.objects.get_or_create(project=task.project, name=name)[0]
+            for name in cleaned_labels
+        ]
+        task.labels.set(label_objects)
+
+
+class TaskStatusForm(forms.Form):
+    status = forms.ChoiceField(choices=Task.Status.choices)
 
 
 class TaskCommentForm(forms.ModelForm):

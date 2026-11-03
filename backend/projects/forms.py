@@ -2,7 +2,7 @@ from django import forms
 
 from accounts.models import User
 
-from .models import Project, ProjectMembership
+from .models import Milestone, Project, ProjectMembership, Sprint
 
 
 class ProjectSearchForm(forms.Form):
@@ -86,3 +86,65 @@ class ProjectMemberForm(forms.Form):
                 (ProjectMembership.Role.TEAM_MEMBER, "Team Member")
             ]
             self.fields["project_role"].initial = ProjectMembership.Role.TEAM_MEMBER
+
+
+class SprintForm(forms.ModelForm):
+    class Meta:
+        model = Sprint
+        fields = ["name", "goal", "start_date", "end_date", "status"]
+        widgets = {
+            "start_date": forms.DateInput(attrs={"type": "date"}),
+            "end_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+    def __init__(self, *args, project, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.project = project
+
+    def clean(self):
+        cleaned_data = super().clean()
+        start_date = cleaned_data.get("start_date")
+        end_date = cleaned_data.get("end_date")
+        status = cleaned_data.get("status")
+        if start_date and end_date and end_date < start_date:
+            self.add_error("end_date", "End date cannot be earlier than the start date.")
+        if self.instance.pk:
+            current_status = self.instance.status
+            allowed = {
+                Sprint.Status.PLANNED: {
+                    Sprint.Status.PLANNED,
+                    Sprint.Status.ACTIVE,
+                },
+                Sprint.Status.ACTIVE: {Sprint.Status.ACTIVE},
+                Sprint.Status.COMPLETED: {Sprint.Status.COMPLETED},
+            }
+            if status not in allowed.get(current_status, {current_status}):
+                self.add_error("status", "Use the sprint lifecycle actions to change this status.")
+        elif status != Sprint.Status.PLANNED:
+            self.add_error("status", "New sprints must start in Planned status.")
+        return cleaned_data
+
+    def save(self, commit=True):
+        sprint = super().save(commit=False)
+        sprint.project = self.project
+        if commit:
+            sprint.save()
+        return sprint
+
+
+class MilestoneForm(forms.ModelForm):
+    class Meta:
+        model = Milestone
+        fields = ["name", "description", "target_date", "status"]
+        widgets = {"target_date": forms.DateInput(attrs={"type": "date"})}
+
+    def __init__(self, *args, project, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.project = project
+
+    def save(self, commit=True):
+        milestone = super().save(commit=False)
+        milestone.project = self.project
+        if commit:
+            milestone.save()
+        return milestone

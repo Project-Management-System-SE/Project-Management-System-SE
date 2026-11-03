@@ -7,6 +7,7 @@ import sys
 
 def main():
     """Run administrative tasks."""
+    os.environ.setdefault("DJANGO_DEBUG", "true")
     os.environ.setdefault('DJANGO_SECRET_KEY', secrets.token_urlsafe(50))
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
     try:

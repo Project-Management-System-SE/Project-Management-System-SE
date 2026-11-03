@@ -85,8 +85,13 @@ pip install -r backend/requirements.txt
 
 ### 4. Configure email for password resets
 
-For local development, use Django's console email backend so reset links are printed in the
-development server output instead of requiring an SMTP account.
+For local development, use Django's console email backend so registration confirmation emails and
+password-reset links are printed in the development server output instead of requiring an SMTP
+account.
+
+After login, the session remains active for 30 days without requiring an extra checkbox. The
+browser can offer to save and autofill the email and password using its password manager; the
+application does not store a readable copy of the password.
 
 ```powershell
 # Windows PowerShell
@@ -105,10 +110,39 @@ environment variables: `DJANGO_EMAIL_BACKEND`, `DJANGO_EMAIL_HOST`, `DJANGO_EMAI
 
 ### 5. Run the application
 
+The development entry point enables Django debug mode by default, so `runserver`
+serves the files in the repository's `static/` directory:
+
+```powershell
+# Windows PowerShell
+python manage.py runserver
+```
+
+```bash
+# Linux / macOS
+python manage.py runserver
+```
+
 ```bash
 python backend/manage.py migrate
 python backend/manage.py runserver
 ```
+
+If you invoke Django through another entry point, enable development static-file
+serving explicitly:
+
+```powershell
+# Windows PowerShell
+$env:DJANGO_DEBUG = "true"
+```
+
+```bash
+# Linux / macOS
+export DJANGO_DEBUG=true
+```
+
+To explicitly disable debug mode, set `DJANGO_DEBUG=false` and provide a
+`DJANGO_SECRET_KEY`.
 
 ### Project management
 
@@ -124,8 +158,8 @@ Open a project's **Tasks** page to switch between the task list and a status boa
 to their details; users with task edit permission can update status and other task fields there.
 The dashboard counts tasks assigned to the signed-in user within visible projects, and project
 progress is the percentage of tasks marked Done. Use **My Tasks** to view those assigned tasks.
-Project and task search supports the currently available fields; sprint filtering is pending the
-sprint lifecycle/model work tracked in issue #41.
+Project and task search supports the currently available fields; sprint and milestone planning is
+available from each project's planning page.
 
 Task attachments are stored below `backend/media` by default (override with `DJANGO_MEDIA_ROOT`)
 and are served only through authenticated, project-authorized downloads. Configure the upload limit
@@ -138,3 +172,26 @@ check for the selected extension. This content validation is not malware scannin
 project members, project owners, and admins may view and add comments or attachments, while task
 editing continues to use the narrower `can_edit_task` rule. Confirm this distinction with the
 issue #19 owner before changing collaboration permissions.
+
+### Task viewing and status updates
+
+Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
+tasks in projects they can access. Project Admins and Project Managers can update any task
+status; an authorized project member can update a task assigned to them or created by them.
+Supported statuses are **To Do**, **In Progress**, and **Done**. Task details also support
+creation, editing, and project-scoped labels.
+
+Invalid status values are rejected without changing the saved task. Run
+`python backend/manage.py migrate` after pulling changes to apply database migrations.
+
+### Task and membership notifications
+
+The application stores notifications in the signed-in user's **Notifications** inbox when they are
+added to or removed from a project, assigned a task, or notified about a task status change or
+comment. Status and comment notifications go to the task assignee and creator, excluding the
+person who made the change. Task assignees receive one in-app due-date reminder the day before a
+task is due. Registration confirmation and password-reset messages continue to use email.
+
+Run `python backend/manage.py send_due_date_reminders` daily to create due-date reminders. Schedule
+this command with Windows Task Scheduler or a deployment scheduler; the command records sent
+reminders so repeated runs do not create duplicates.

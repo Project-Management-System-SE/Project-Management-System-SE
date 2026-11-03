@@ -21,7 +21,7 @@
 </section>
 
 <article class="card">
-    <div class="task-detail-meta" style="display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap;">
+    <div class="task-detail-meta">
         <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
             {{ task.get_status_display }}
         </span>
@@ -33,14 +33,30 @@
     <h3>Description</h3>
     <p>{{ task.description|default:"No description provided."|linebreaksbr }}</p>
 
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 1rem; margin-top: 1.5rem;">
+    <div class="task-detail-grid">
         <div>
             <strong>Assignee:</strong>
-            <p>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</p>
+            <p>{% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}</p>
         </div>
         <div>
             <strong>Due date:</strong>
             <p>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
+            <strong>Estimated effort:</strong>
+            <p>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }} hours{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
+            <strong>Actual effort:</strong>
+            <p>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }} hours{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
+            <strong>Sprint:</strong>
+            <p>{% if task.sprint %}<a href="{% url 'projects:sprint-detail' project.pk task.sprint.pk %}">{{ task.sprint.name }}</a>{% else %}Backlog{% endif %}</p>
+        </div>
+        <div>
+            <strong>Milestone:</strong>
+            <p>{% if task.milestone %}{{ task.milestone.name }}{% else %}Not set{% endif %}</p>
         </div>
         <div>
             <strong>Created by:</strong>
@@ -52,8 +68,8 @@
         </div>
     </div>
 
-    <div style="margin-top: 1.5rem;">
-        <strong>Labels:</strong>
+    <div class="task-detail-labels">
+        <strong>Labels</strong>
         <div class="task-labels-list">
             {% for label in task.labels.all %}
             <span class="task-label">{{ label.name }}</span>
@@ -63,6 +79,25 @@
         </div>
     </div>
 </article>
+
+{% if can_update_status %}
+<section class="card project-form" aria-labelledby="update-task-status-heading">
+    <h2 id="update-task-status-heading">Update status</h2>
+    <form method="post" action="{% url 'tasks:task-update-status' project.pk task.pk %}">
+        {% csrf_token %}
+        <div class="form-field">
+            <label for="{{ status_form.status.id_for_label }}">Status</label>
+            {{ status_form.status }}
+            {% if status_form.status.errors %}
+            <div class="field-errors" role="alert">{{ status_form.status.errors }}</div>
+            {% endif %}
+        </div>
+        <div class="project-form-actions">
+            <button type="submit">Save status</button>
+        </div>
+    </form>
+</section>
+{% endif %}
 
 <section class="task-collaboration" aria-labelledby="task-comments-heading">
     <div class="task-collaboration-section">
@@ -84,7 +119,7 @@
         {% endif %}
 
         <form class="card task-collaboration-form" method="post"
-            action="{% url 'tasks:task-comment-create' project.pk task.pk %}">
+            action="{% url 'tasks:task-add-comment' project.pk task.pk %}">
             {% csrf_token %}
             {% if comment_form.non_field_errors %}
             <div class="form-errors" role="alert">{{ comment_form.non_field_errors }}</div>

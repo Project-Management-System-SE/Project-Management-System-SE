@@ -8,7 +8,10 @@ from projects.forms import ProjectMemberForm, ProjectUpdateForm
 from projects.models import Project, ProjectMembership
 
 
-@override_settings(PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"])
+@override_settings(
+    PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+    EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+)
 class ProjectManagementTests(TestCase):
     def setUp(self):
         self.admin = User.objects.create_superuser(

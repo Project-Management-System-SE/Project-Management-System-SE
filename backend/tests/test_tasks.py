@@ -1,9 +1,13 @@
 import tempfile
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import IntegrityError, connection, transaction
+from django.db.models.deletion import RestrictedError
+from django.template.loader import render_to_string
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -63,6 +67,85 @@ class TaskBackendModelAndLabelTests(TestCase):
         self.assertIsNone(task.due_date)
         self.assertIn("Setup database", str(task))
 
+    def test_valid_task_persistence(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="  Persisted task  ",
+            description="Task details",
+            priority=Task.Priority.HIGH,
+            status=Task.Status.IN_PROGRESS,
+            assignee=self.member,
+            created_by=self.owner,
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.title, "Persisted task")
+        self.assertEqual(task.description, "Task details")
+        self.assertEqual(task.project, self.project)
+        self.assertEqual(task.assignee, self.member)
+        self.assertEqual(task.created_by, self.owner)
+
+    def test_effort_values_persist_and_actual_may_exceed_estimate(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Effort tracking",
+            estimated_effort=Decimal("1.25"),
+            actual_effort=Decimal("2.50"),
+            created_by=self.owner,
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.estimated_effort, Decimal("1.25"))
+        self.assertEqual(task.actual_effort, Decimal("2.50"))
+
+    def test_zero_and_blank_effort_values_are_allowed(self):
+        zero_task = Task.objects.create(
+            project=self.project,
+            title="Zero effort",
+            estimated_effort=Decimal("0.00"),
+            actual_effort=Decimal("0.00"),
+            created_by=self.owner,
+        )
+        blank_task = Task.objects.create(
+            project=self.project,
+            title="Blank effort",
+            created_by=self.owner,
+        )
+
+        zero_task.refresh_from_db()
+        blank_task.refresh_from_db()
+        self.assertEqual(zero_task.estimated_effort, Decimal("0.00"))
+        self.assertEqual(zero_task.actual_effort, Decimal("0.00"))
+        self.assertIsNone(blank_task.estimated_effort)
+        self.assertIsNone(blank_task.actual_effort)
+
+    def test_negative_effort_values_are_rejected_by_database_constraints(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Negative estimate",
+                            estimated_effort=Decimal("-0.01"),
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Negative actual",
+                            actual_effort=Decimal("-0.01"),
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
     def test_task_assignee_validation_must_be_project_member(self):
         task = Task(
             project=self.project,
@@ -72,6 +155,57 @@ class TaskBackendModelAndLabelTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             task.clean()
+
+    def test_invalid_assignee_is_rejected_when_saved(self):
+        task = Task(
+            project=self.project,
+            title="Invalid assignee task",
+            created_by=self.owner,
+            assignee=self.other_user,
+        )
+
+        with self.assertRaises(ValidationError):
+            task.save()
+
+    def test_invalid_status_and_priority_are_rejected_by_database(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Invalid status",
+                            status="INVALID",
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Invalid priority",
+                            priority="INVALID",
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+    def test_task_indexes_cover_project_status_and_project_created_order(self):
+        constraints = connection.introspection.get_constraints(
+            connection.cursor(), Task._meta.db_table
+        )
+        index_columns = {
+            tuple(details["columns"])
+            for details in constraints.values()
+            if details.get("index")
+        }
+
+        self.assertIn(("project_id", "status"), index_columns)
+        self.assertIn(("project_id", "created_at"), index_columns)
 
     def test_labels_project_scoping_and_normalization(self):
         label1 = TaskLabel.objects.create(
@@ -101,6 +235,26 @@ class TaskBackendModelAndLabelTests(TestCase):
         )
         self.assertEqual(label_b.project, project_b)
 
+        task = Task.objects.create(
+            project=self.project,
+            title="Project-scoped labels",
+            created_by=self.owner,
+        )
+        with self.assertRaises(ValidationError):
+            task.labels.add(label_b)
+
+    def test_reverse_label_assignment_rejects_cross_project_task(self):
+        project_b = Project.objects.create(name="Beta Project", owner=self.owner)
+        label = TaskLabel.objects.create(project=self.project, name="urgent")
+        task = Task.objects.create(
+            project=project_b,
+            title="Other project task",
+            created_by=self.owner,
+        )
+
+        with self.assertRaises(ValidationError):
+            label.tasks.add(task)
+
     def test_task_labels_persistence_and_update(self):
         task = Task.objects.create(
             project=self.project,
@@ -120,6 +274,55 @@ class TaskBackendModelAndLabelTests(TestCase):
         self.assertEqual(task.labels.count(), 2)
         self.assertNotIn("ui", task.get_labels_as_string())
         self.assertIn("accessibility", task.get_labels_as_string())
+
+    def test_creator_cannot_be_deleted_while_referenced(self):
+        creator = User.objects.create_user(
+            email="creator@example.com",
+            username="creator",
+            full_name="Task Creator",
+            password="safe-password-123",
+        )
+        task = Task.objects.create(
+            project=self.project,
+            title="Protected creator",
+            created_by=creator,
+        )
+
+        with self.assertRaises(RestrictedError):
+            creator.delete()
+
+        self.assertTrue(Task.objects.filter(pk=task.pk).exists())
+
+    def test_deleted_assignee_is_set_to_null(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Nullable assignee",
+            assignee=self.member,
+            created_by=self.owner,
+        )
+
+        self.member.delete()
+
+        task.refresh_from_db()
+        self.assertIsNone(task.assignee_id)
+
+    def test_completed_timestamp_is_set_and_cleared_with_status(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Completion lifecycle",
+            created_by=self.owner,
+        )
+        self.assertIsNone(task.completed_at)
+
+        task.status = Task.Status.DONE
+        task.save(update_fields={"status"})
+        task.refresh_from_db()
+        self.assertIsNotNone(task.completed_at)
+
+        task.status = Task.Status.IN_PROGRESS
+        task.save(update_fields={"status"})
+        task.refresh_from_db()
+        self.assertIsNone(task.completed_at)
 
 
 class TaskFormTests(TestCase):
@@ -164,6 +367,8 @@ class TaskFormTests(TestCase):
                 "description": "Ensure 100% test coverage.",
                 "priority": "HIGH",
                 "due_date": "2026-12-31",
+                "estimated_effort": "4.25",
+                "actual_effort": "3.50",
                 "assignee": str(self.member.pk),
                 "status": "IN_PROGRESS",
                 "labels": "testing, Quality, Backend",
@@ -179,6 +384,8 @@ class TaskFormTests(TestCase):
         self.assertEqual(task.title, "Write unit tests")
         self.assertEqual(task.assignee, self.member)
         self.assertEqual(task.priority, Task.Priority.HIGH)
+        self.assertEqual(task.estimated_effort, Decimal("4.25"))
+        self.assertEqual(task.actual_effort, Decimal("3.50"))
         self.assertEqual(task.status, Task.Status.IN_PROGRESS)
         self.assertEqual(task.labels.count(), 3)
         self.assertEqual(
@@ -210,6 +417,123 @@ class TaskFormTests(TestCase):
         )
         self.assertFalse(form.is_valid())
         self.assertIn("assignee", form.errors)
+
+    def test_assignee_queryset_contains_members_owner_excludes_outsiders_and_allows_unassigned(
+        self,
+    ):
+        form = TaskForm(project=self.project)
+        assignee_queryset = form.fields["assignee"].queryset
+
+        self.assertEqual(
+            set(assignee_queryset.values_list("pk", flat=True)),
+            {self.owner.pk, self.member.pk},
+        )
+        self.assertEqual(form.fields["assignee"].empty_label, "Unassigned")
+
+    def test_edit_form_prepopulates_all_task_values(self):
+        label = TaskLabel.objects.create(project=self.project, name="frontend")
+        task = Task.objects.create(
+            project=self.project,
+            title="Existing task",
+            description="Existing description",
+            priority=Task.Priority.HIGH,
+            due_date=date(2026, 12, 31),
+            assignee=self.member,
+            status=Task.Status.IN_PROGRESS,
+            created_by=self.owner,
+        )
+        task.labels.add(label)
+
+        form = TaskForm(instance=task)
+
+        self.assertEqual(form.initial["title"], "Existing task")
+        self.assertEqual(form.initial["description"], "Existing description")
+        self.assertEqual(form.initial["priority"], Task.Priority.HIGH)
+        self.assertEqual(form.initial["due_date"], date(2026, 12, 31))
+        self.assertEqual(form.initial["assignee"], self.member.pk)
+        self.assertEqual(form.initial["status"], Task.Status.IN_PROGRESS)
+        self.assertEqual(form.fields["labels"].initial, "frontend")
+
+    def test_actual_task_form_rejects_invalid_priority(self):
+        form = TaskForm(
+            data={
+                "title": "Invalid priority task",
+                "priority": "NOT_A_PRIORITY",
+                "status": Task.Status.TODO,
+            },
+            project=self.project,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("priority", form.errors)
+
+    def test_task_form_validates_effort_values_and_precision(self):
+        valid_form = TaskForm(
+            data={
+                "title": "Effort form task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "2.50",
+                "actual_effort": "3.75",
+            },
+            project=self.project,
+        )
+        negative_form = TaskForm(
+            data={
+                "title": "Negative effort task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "-0.01",
+            },
+            project=self.project,
+        )
+        precision_form = TaskForm(
+            data={
+                "title": "Precise effort task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "1.234",
+            },
+            project=self.project,
+        )
+
+        self.assertTrue(valid_form.is_valid(), valid_form.errors)
+        self.assertEqual(
+            valid_form.cleaned_data["estimated_effort"], Decimal("2.50")
+        )
+        self.assertEqual(valid_form.cleaned_data["actual_effort"], Decimal("3.75"))
+        self.assertFalse(negative_form.is_valid())
+        self.assertIn("estimated_effort", negative_form.errors)
+        self.assertFalse(precision_form.is_valid())
+        self.assertIn("estimated_effort", precision_form.errors)
+
+    def test_actual_task_form_renders_field_and_non_field_errors(self):
+        form = TaskForm(
+            data={
+                "title": "Invalid priority task",
+                "priority": "NOT_A_PRIORITY",
+                "status": Task.Status.TODO,
+            },
+            project=self.project,
+        )
+        self.assertFalse(form.is_valid())
+        form.add_error(None, "Task could not be saved.")
+
+        html = render_to_string(
+            "task_form.html",
+            {
+                "form": form,
+                "form_heading": "Create task",
+                "submit_label": "Create task",
+            },
+        )
+
+        self.assertIn('id="id_priority_errors"', html)
+        self.assertIn('class="field-errors"', html)
+        self.assertIn('role="alert"', html)
+        self.assertIn("Select a valid choice", html)
+        self.assertIn("Task could not be saved.", html)
+        self.assertIn('class="form-errors"', html)
 
     def test_labels_deduplication_trimming_and_max_length(self):
         # Trimming and deduplication
@@ -261,6 +585,8 @@ class TaskFormTests(TestCase):
                 "title": "Initial Task Updated",
                 "priority": "MEDIUM",
                 "status": "DONE",
+                "estimated_effort": "8.00",
+                "actual_effort": "10.25",
                 "labels": "v1, hotfix",
             },
             instance=task,
@@ -269,12 +595,15 @@ class TaskFormTests(TestCase):
         updated_task = update_form.save()
 
         self.assertEqual(updated_task.status, Task.Status.DONE)
+        self.assertEqual(updated_task.estimated_effort, Decimal("8.00"))
+        self.assertEqual(updated_task.actual_effort, Decimal("10.25"))
         self.assertEqual(
             set(updated_task.labels.values_list("name", flat=True)),
             {"v1", "hotfix"},
         )
 
 
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class TaskViewAndPermissionTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -485,6 +814,27 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(first_page, "q=Paged&amp;page=2")
         self.assertEqual(len(second_page.context["tasks"]), 1)
 
+    def test_task_detail_and_list_display_effort_values(self):
+        self.task.estimated_effort = Decimal("4.25")
+        self.task.actual_effort = Decimal("5.50")
+        self.task.save()
+        self.client.force_login(self.member)
+
+        detail_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        list_response = self.client.get(
+            reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+        )
+
+        self.assertContains(detail_response, "4.25 hours")
+        self.assertContains(detail_response, "5.50 hours")
+        self.assertContains(list_response, "4.25h")
+        self.assertContains(list_response, "5.50h")
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
@@ -496,6 +846,8 @@ class TaskViewAndPermissionTests(TestCase):
                 "description": "Detailed explanation",
                 "priority": "CRITICAL",
                 "due_date": "2026-11-15",
+                "estimated_effort": "6.00",
+                "actual_effort": "7.25",
                 "assignee": str(self.member.pk),
                 "status": "TODO",
                 "labels": "audit, core",
@@ -505,6 +857,8 @@ class TaskViewAndPermissionTests(TestCase):
 
         created_task = Task.objects.get(title="New Manager Task")
         self.assertEqual(created_task.priority, Task.Priority.CRITICAL)
+        self.assertEqual(created_task.estimated_effort, Decimal("6.00"))
+        self.assertEqual(created_task.actual_effort, Decimal("7.25"))
         self.assertEqual(created_task.created_by, self.owner)
         self.assertEqual(created_task.assignee, self.member)
         self.assertEqual(
@@ -525,6 +879,25 @@ class TaskViewAndPermissionTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_create_rejects_outsider_assignee_without_persisting_task(self):
+        self.client.force_login(self.owner)
+        create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
+
+        response = self.client.post(
+            create_url,
+            data={
+                "title": "Task with outsider",
+                "description": "Should not be saved",
+                "priority": "HIGH",
+                "status": "TODO",
+                "assignee": str(self.outsider.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("assignee", response.context["form"].errors)
+        self.assertFalse(Task.objects.filter(title="Task with outsider").exists())
 
     def test_assignee_can_update_task_and_labels(self):
         self.client.login(email="member@example.com", password="password123")
@@ -548,6 +921,8 @@ class TaskViewAndPermissionTests(TestCase):
                 "description": "Updated progress notes",
                 "priority": "HIGH",
                 "due_date": "",
+                "estimated_effort": "8.00",
+                "actual_effort": "9.50",
                 "assignee": str(self.member.pk),
                 "status": "IN_PROGRESS",
                 "labels": "security, in-review",
@@ -558,10 +933,61 @@ class TaskViewAndPermissionTests(TestCase):
         self.task.refresh_from_db()
         self.assertEqual(self.task.title, "First Secure Task (In Progress)")
         self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
+        self.assertEqual(self.task.estimated_effort, Decimal("8.00"))
+        self.assertEqual(self.task.actual_effort, Decimal("9.50"))
         self.assertEqual(
             set(self.task.labels.values_list("name", flat=True)),
             {"security", "in-review"},
         )
+
+    def test_edit_rejects_outsider_assignee_without_changing_task(self):
+        self.client.force_login(self.member)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = self.client.post(
+            edit_url,
+            data={
+                "title": "Attempted unauthorized assignment",
+                "description": "Should not be saved",
+                "priority": "LOW",
+                "status": "IN_PROGRESS",
+                "assignee": str(self.outsider.pk),
+                "labels": "security",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("assignee", response.context["form"].errors)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.description, "Confidential task details")
+        self.assertEqual(self.task.priority, Task.Priority.HIGH)
+        self.assertEqual(self.task.status, Task.Status.TODO)
+        self.assertEqual(self.task.assignee, self.member)
+
+    def test_outsider_cannot_edit_task(self):
+        self.client.force_login(self.outsider)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = self.client.post(
+            edit_url,
+            data={
+                "title": "Unauthorized edit",
+                "priority": "LOW",
+                "status": "TODO",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.assignee, self.member)
 
     def test_invalid_submission_re_renders_form_and_preserves_values(self):
         self.client.login(email="manager@example.com", password="password123")
@@ -596,6 +1022,30 @@ class TaskViewAndPermissionTests(TestCase):
             data={"title": "No CSRF Task"},
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_real_csrf_protection_on_task_edit_endpoint(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.member)
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = csrf_client.post(
+            edit_url,
+            data={
+                "title": "CSRF bypass attempt",
+                "priority": "LOW",
+                "status": "TODO",
+                "assignee": str(self.member.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "First Secure Task")
+        self.assertEqual(self.task.priority, Task.Priority.HIGH)
+        self.assertEqual(self.task.assignee, self.member)
 
 
 class TaskCollaborationTests(TestCase):

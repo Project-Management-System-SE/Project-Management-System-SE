@@ -7,12 +7,13 @@
 {% endblock %}
 
 {% block content %}
+<div class="auth-layout">
 <section class="project-form-intro" aria-labelledby="register-heading">
     <h2 id="register-heading">Join your workspace</h2>
     <p>Create an account with your name, email address, and password.</p>
 </section>
 
-<form class="card project-form" method="post">
+<form class="card project-form auth-form" method="post">
     {% csrf_token %}
 
     {% if form.non_field_errors %}
@@ -37,4 +38,5 @@
     </div>
     <p>Already registered? <a href="{% url 'login' %}">Log in</a>.</p>
 </form>
+</div>
 {% endblock %}
