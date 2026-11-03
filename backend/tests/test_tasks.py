@@ -1,13 +1,16 @@
-from datetime import date
+import tempfile
+from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from projects.models import Project, ProjectMembership
 from tasks.forms import TaskForm
-from tasks.models import Task, TaskLabel
+from tasks.models import Task, TaskAttachment, TaskComment, TaskLabel
 
 User = get_user_model()
 
@@ -357,6 +360,131 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
 
+    def test_board_groups_tasks_by_defined_status_and_preserves_task_access(self):
+        in_progress_task = Task.objects.create(
+            project=self.project,
+            title="In progress task",
+            status=Task.Status.IN_PROGRESS,
+            created_by=self.owner,
+        )
+        done_task = Task.objects.create(
+            project=self.project,
+            title="Completed task",
+            status=Task.Status.DONE,
+            created_by=self.owner,
+        )
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"view": "board"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [column["status"] for column in response.context["task_columns"]],
+            [status for status, _ in Task.Status.choices],
+        )
+        tasks_by_status = {
+            column["status"]: column["tasks"]
+            for column in response.context["task_columns"]
+        }
+        self.assertEqual(tasks_by_status[Task.Status.TODO], [self.task])
+        self.assertEqual(tasks_by_status[Task.Status.IN_PROGRESS], [in_progress_task])
+        self.assertEqual(tasks_by_status[Task.Status.DONE], [done_task])
+        self.assertContains(response, "Tasks grouped by status")
+        self.assertContains(response, "In progress task")
+        self.assertContains(response, "Completed task")
+
+    def test_task_list_remains_default_view(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["view_mode"], "list")
+        self.assertEqual(response.context["task_columns"], [])
+        self.assertContains(response, "First Secure Task")
+        self.assertNotContains(response, "Tasks grouped by status")
+
+    def test_task_filters_combine_keyword_assignee_priority_status_and_label(self):
+        matching_label = self.task.labels.get()
+        other_task = Task.objects.create(
+            project=self.project,
+            title="First Secure Task follow-up",
+            description="Confidential task details",
+            priority=Task.Priority.LOW,
+            status=Task.Status.DONE,
+            created_by=self.owner,
+            assignee=self.owner,
+        )
+        other_label = TaskLabel.objects.create(
+            project=self.project,
+            name="follow-up",
+        )
+        other_task.labels.add(other_label)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+        self.client.force_login(self.member)
+
+        response = self.client.get(
+            list_url,
+            {
+                "q": "First Secure",
+                "assignee": str(self.member.pk),
+                "priority": Task.Priority.HIGH,
+                "status": Task.Status.TODO,
+                "label": str(matching_label.pk),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(response.context["tasks"].values_list("pk", flat=True)),
+            [self.task.pk],
+        )
+        self.assertContains(response, "First Secure Task")
+        self.assertNotContains(response, "First Secure Task follow-up")
+
+    def test_task_filter_empty_state_and_clear_link(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"q": "no matching task", "view": "board"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["view_mode"], "board")
+        self.assertEqual(list(response.context["tasks"]), [])
+        self.assertContains(response, "No tasks in this status.")
+        self.assertContains(response, "Clear filters")
+
+    def test_invalid_assignee_filter_is_rejected(self):
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        response = self.client.get(list_url, {"assignee": str(self.outsider.pk)})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["filter_form"].is_valid())
+        self.assertEqual(list(response.context["tasks"]), [])
+        self.assertContains(response, "Select a valid choice")
+
+    def test_task_list_paginates_filtered_results_and_preserves_search(self):
+        for index in range(21):
+            Task.objects.create(
+                project=self.project,
+                title=f"Paged task {index}",
+                created_by=self.owner,
+            )
+        self.client.force_login(self.member)
+        list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+
+        first_page = self.client.get(list_url, {"q": "Paged"})
+        second_page = self.client.get(list_url, {"q": "Paged", "page": "2"})
+
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
+        self.assertEqual(len(first_page.context["tasks"]), 20)
+        self.assertContains(first_page, "q=Paged&amp;page=2")
+        self.assertEqual(len(second_page.context["tasks"]), 1)
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
@@ -468,3 +596,344 @@ class TaskViewAndPermissionTests(TestCase):
             data={"title": "No CSRF Task"},
         )
         self.assertEqual(response.status_code, 403)
+
+
+class TaskCollaborationTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.media_directory = tempfile.TemporaryDirectory()
+        cls.media_settings = override_settings(MEDIA_ROOT=cls.media_directory.name)
+        cls.media_settings.enable()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.media_settings.disable()
+        cls.media_directory.cleanup()
+        super().tearDownClass()
+
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            email="collab-owner@example.com",
+            username="collab-owner",
+            full_name="Project Owner",
+        )
+        self.member = User.objects.create_user(
+            email="collab-member@example.com",
+            username="collab-member",
+            full_name="Task Assignee",
+        )
+        self.observer = User.objects.create_user(
+            email="observer@example.com",
+            username="observer",
+            full_name="Project Observer",
+        )
+        self.outsider = User.objects.create_user(
+            email="collab-outsider@example.com",
+            username="collab-outsider",
+            full_name="Outsider",
+        )
+        self.project = Project.objects.create(name="Collaboration", owner=self.owner)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.owner,
+            project_role=ProjectMembership.Role.PROJECT_MANAGER,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.observer,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        self.task = Task.objects.create(
+            project=self.project,
+            title="Collaborative task",
+            created_by=self.owner,
+            assignee=self.member,
+        )
+        self.comment_url = reverse(
+            "tasks:task-comment-create",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.upload_url = reverse(
+            "tasks:task-attachment-upload",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+    def test_comment_persists_author_and_creation_timestamp(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(self.comment_url, {"content": "Ready for review."})
+
+        self.assertRedirects(
+            response,
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            ),
+        )
+        comment = TaskComment.objects.get()
+        self.assertEqual(comment.task, self.task)
+        self.assertEqual(comment.author, self.member)
+        self.assertEqual(comment.content, "Ready for review.")
+        self.assertIsNotNone(comment.created_at)
+        self.assertLessEqual(timezone.now() - comment.created_at, timedelta(seconds=30))
+        detail_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        self.assertContains(detail_response, "Ready for review.")
+        self.assertContains(detail_response, "Task Assignee")
+
+    def test_comments_render_in_chronological_order(self):
+        earlier = TaskComment.objects.create(
+            task=self.task,
+            author=self.owner,
+            content="First comment",
+        )
+        later = TaskComment.objects.create(
+            task=self.task,
+            author=self.member,
+            content="Second comment",
+        )
+        TaskComment.objects.filter(pk=earlier.pk).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        self.client.force_login(self.member)
+
+        response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+
+        self.assertEqual(list(response.context["comments"]), [earlier, later])
+        content = response.content.decode()
+        self.assertLess(content.index("First comment"), content.index("Second comment"))
+
+    def test_project_member_can_comment_without_task_edit_permission(self):
+        self.assertTrue(self.project.memberships.filter(user=self.observer).exists())
+        self.client.force_login(self.observer)
+
+        response = self.client.post(
+            self.comment_url,
+            {"content": "I can collaborate without editing task fields."},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TaskComment.objects.get().author, self.observer)
+
+    def test_empty_comment_is_rejected_without_persisting(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(self.comment_url, {"content": "   "})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This field is required.")
+        self.assertFalse(TaskComment.objects.exists())
+
+    def test_valid_attachment_upload_and_authorized_download(self):
+        self.client.force_login(self.observer)
+        uploaded_file = SimpleUploadedFile(
+            "design.pdf",
+            b"%PDF-1.4\nQA fixture\n%%EOF\n",
+            content_type="application/pdf",
+        )
+
+        response = self.client.post(self.upload_url, {"file": uploaded_file})
+
+        self.assertEqual(response.status_code, 302)
+        attachment = TaskAttachment.objects.get()
+        self.assertEqual(attachment.task, self.task)
+        self.assertEqual(attachment.uploaded_by, self.observer)
+        self.assertEqual(attachment.original_filename, "design.pdf")
+        self.assertTrue(attachment.file.storage.exists(attachment.file.name))
+        detail_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        self.assertContains(detail_response, "design.pdf")
+
+        download_url = reverse(
+            "tasks:task-attachment-download",
+            kwargs={
+                "project_id": self.project.pk,
+                "task_id": self.task.pk,
+                "attachment_id": attachment.pk,
+            },
+        )
+        response = self.client.get(download_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/octet-stream")
+        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+        self.assertIn('attachment; filename="design.pdf"', response["Content-Disposition"])
+        self.assertEqual(
+            b"".join(response.streaming_content),
+            b"%PDF-1.4\nQA fixture\n%%EOF\n",
+        )
+
+    def test_disallowed_file_type_is_rejected(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(
+            self.upload_url,
+            {
+                "file": SimpleUploadedFile(
+                    "payload.exe",
+                    b"not allowed",
+                    content_type="application/octet-stream",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Unsupported file type")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_allowed_extension_with_unrelated_content_is_rejected(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(
+            self.upload_url,
+            {
+                "file": SimpleUploadedFile(
+                    "renamed-executable.pdf",
+                    b"MZThis is not a PDF file",
+                    content_type="application/pdf",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "file contents do not match the .pdf file type")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_empty_and_malformed_uploads_are_rejected(self):
+        self.client.force_login(self.member)
+
+        empty_response = self.client.post(
+            self.upload_url,
+            {"file": SimpleUploadedFile("empty.txt", b"", content_type="text/plain")},
+        )
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertContains(empty_response, "The uploaded file is empty.")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+        malformed_response = self.client.post(
+            self.upload_url,
+            {
+                "file": SimpleUploadedFile(
+                    "broken.docx",
+                    b"PK\x03\x04truncated office archive",
+                    content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+        )
+        self.assertEqual(malformed_response.status_code, 200)
+        self.assertContains(
+            malformed_response,
+            "file contents do not match the .docx file type",
+        )
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_file_over_configured_size_is_rejected(self):
+        self.client.force_login(self.member)
+        with self.settings(TASK_ATTACHMENT_MAX_SIZE_BYTES=5):
+            response = self.client.post(
+                self.upload_url,
+                {
+                    "file": SimpleUploadedFile(
+                        "notes.txt",
+                        b"123456",
+                        content_type="text/plain",
+                    )
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "File must be no larger than 5 bytes.")
+        self.assertFalse(TaskAttachment.objects.exists())
+
+    def test_invalid_upload_does_not_replace_existing_attachment(self):
+        self.client.force_login(self.member)
+        valid_file = SimpleUploadedFile("notes.txt", b"existing", content_type="text/plain")
+        self.client.post(self.upload_url, {"file": valid_file})
+        attachment = TaskAttachment.objects.get()
+
+        response = self.client.post(
+            self.upload_url,
+            {"file": SimpleUploadedFile("payload.exe", b"invalid")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TaskAttachment.objects.count(), 1)
+        self.assertTrue(attachment.file.storage.exists(attachment.file.name))
+
+    def test_outsider_cannot_read_or_submit_comments_or_attachments(self):
+        attachment = TaskAttachment.objects.create(
+            task=self.task,
+            uploaded_by=self.member,
+            file=SimpleUploadedFile("private.txt", b"private"),
+            original_filename="private.txt",
+        )
+        self.client.force_login(self.outsider)
+
+        comment_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        add_comment_response = self.client.post(
+            self.comment_url,
+            {"content": "Unauthorized"},
+        )
+        upload_response = self.client.post(
+            self.upload_url,
+            {"file": SimpleUploadedFile("notes.txt", b"unauthorized")},
+        )
+        download_response = self.client.get(
+            reverse(
+                "tasks:task-attachment-download",
+                kwargs={
+                    "project_id": self.project.pk,
+                    "task_id": self.task.pk,
+                    "attachment_id": attachment.pk,
+                },
+            )
+        )
+
+        self.assertEqual(comment_response.status_code, 404)
+        self.assertEqual(add_comment_response.status_code, 404)
+        self.assertEqual(upload_response.status_code, 404)
+        self.assertEqual(download_response.status_code, 404)
+        self.assertFalse(TaskComment.objects.exists())
+        self.assertEqual(TaskAttachment.objects.count(), 1)
+
+    def test_comment_and_upload_posts_require_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.member)
+
+        comment_response = csrf_client.post(
+            self.comment_url,
+            {"content": "Missing token"},
+        )
+        upload_response = csrf_client.post(
+            self.upload_url,
+            {"file": SimpleUploadedFile("notes.txt", b"missing token")},
+        )
+
+        self.assertEqual(comment_response.status_code, 403)
+        self.assertEqual(upload_response.status_code, 403)
+        self.assertFalse(TaskComment.objects.exists())
+        self.assertFalse(TaskAttachment.objects.exists())

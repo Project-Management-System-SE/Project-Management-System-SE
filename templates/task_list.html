@@ -13,6 +13,14 @@
         <p>Review and track tasks for <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a>.</p>
     </div>
     <div class="project-form-actions">
+        <nav class="task-view-toggle" aria-label="Task view">
+            <a class="button{% if view_mode == 'board' %} button-secondary{% endif %}"
+                href="{% url 'tasks:task-list' project.pk %}{% if filter_query %}?{{ filter_query }}{% endif %}"
+                {% if view_mode == 'list' %}aria-current="page"{% endif %}>List</a>
+            <a class="button{% if view_mode != 'board' %} button-secondary{% endif %}"
+                href="{% url 'tasks:task-list' project.pk %}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=board"
+                {% if view_mode == 'board' %}aria-current="page"{% endif %}>Board</a>
+        </nav>
         {% if can_create_task %}
         <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create task</a>
         {% endif %}
@@ -20,6 +28,61 @@
     </div>
 </section>
 
+<form class="card search-filter-form" method="get">
+    {% if view_mode == 'board' %}<input type="hidden" name="view" value="board">{% endif %}
+    {% for field in filter_form %}
+    <div class="form-field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}
+        <div class="field-errors" role="alert">{{ error }}</div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="search-filter-actions">
+        <button type="submit">Apply filters</button>
+        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}{% if view_mode == 'board' %}?view=board{% endif %}">
+            Clear filters
+        </a>
+    </div>
+</form>
+
+{% if view_mode == 'board' %}
+<div class="task-board" aria-label="Tasks grouped by status">
+    {% for column in task_columns %}
+    <section class="task-board-column" aria-labelledby="task-status-{{ forloop.counter }}">
+        <header class="task-board-column-heading">
+            <h3 id="task-status-{{ forloop.counter }}">{{ column.label }}</h3>
+            <span class="task-board-count">{{ column.tasks|length }}</span>
+        </header>
+        {% if column.tasks %}
+        <ul class="task-board-cards">
+            {% for task in column.tasks %}
+            <li class="card task-board-card">
+                <h4><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h4>
+                <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
+                <div class="task-board-meta">
+                    <span>Priority: <strong>{{ task.get_priority_display }}</strong></span>
+                    <span>Assignee: <strong>{% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}</strong></span>
+                    <span>Due: <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
+                </div>
+                {% if task.labels.all %}
+                <div class="task-labels-list">
+                    {% for label in task.labels.all %}
+                    <span class="task-label">{{ label.name }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="task-board-empty">No tasks in this status.</p>
+        {% endif %}
+    </section>
+    {% endfor %}
+</div>
+{% else %}
 {% if tasks %}
 <ul class="projects-list">
     {% for task in tasks %}
@@ -33,7 +96,7 @@
         <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; font-size: 0.875rem; color: var(--color-muted);">
             <span>Priority: <strong>{{ task.get_priority_display }}</strong></span>
-            <span>Assignee: <strong>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</strong></span>
+            <span>Assignee: <strong>{% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}</strong></span>
             <span>Due: <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}—{% endif %}</strong></span>
         </div>
         {% if task.labels.all %}
@@ -56,5 +119,18 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
+{% endif %}
+
+{% if page_obj and page_obj.has_other_pages %}
+<nav class="pagination-nav" aria-label="Task pages">
+    {% if page_obj.has_previous %}
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+    {% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+    {% endif %}
+</nav>
 {% endif %}
 {% endblock %}

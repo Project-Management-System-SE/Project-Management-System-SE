@@ -35,13 +35,13 @@
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">My Tasks</h2>
         <p class="summary-value">
-            <span aria-label="Task data unavailable">—</span>
+            <a href="{% url 'tasks:my-tasks' %}">{{ my_tasks }}</a>
         </p>
     </article>
     <article class="card dashboard-summary-card">
         <h2 class="summary-label">Completed Tasks</h2>
         <p class="summary-value">
-            <span aria-label="Task data unavailable">—</span>
+            {{ completed_tasks }}
         </p>
     </article>
 </section>
@@ -50,7 +50,7 @@
     <div class="dashboard-section-heading">
         <div>
             <h2 id="recent-projects-heading">Recent Projects</h2>
-            <p>Check the latest status and progress availability for your projects.</p>
+            <p>Check the latest status and task completion progress for your projects.</p>
         </div>
     </div>
 
@@ -64,7 +64,15 @@
             </div>
             <div class="project-progress">
                 <span>Progress</span>
-                <span class="progress-unavailable" aria-label="Progress unavailable">—</span>
+                {% if project.task_count %}
+                <progress
+                    value="{% widthratio project.completed_task_count project.task_count 100 %}"
+                    max="100"
+                    aria-label="{{ project.name }} task completion"></progress>
+                <span>{% widthratio project.completed_task_count project.task_count 100 %}%</span>
+                {% else %}
+                <span class="progress-unavailable">No tasks yet</span>
+                {% endif %}
             </div>
             <p class="project-due-date">
                 <span class="project-detail-label">Due date:</span>
