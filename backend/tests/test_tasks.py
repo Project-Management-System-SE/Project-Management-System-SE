@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -80,6 +81,67 @@ class TaskBackendModelAndLabelTests(TestCase):
         self.assertEqual(task.project, self.project)
         self.assertEqual(task.assignee, self.member)
         self.assertEqual(task.created_by, self.owner)
+
+    def test_effort_values_persist_and_actual_may_exceed_estimate(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Effort tracking",
+            estimated_effort=Decimal("1.25"),
+            actual_effort=Decimal("2.50"),
+            created_by=self.owner,
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.estimated_effort, Decimal("1.25"))
+        self.assertEqual(task.actual_effort, Decimal("2.50"))
+
+    def test_zero_and_blank_effort_values_are_allowed(self):
+        zero_task = Task.objects.create(
+            project=self.project,
+            title="Zero effort",
+            estimated_effort=Decimal("0.00"),
+            actual_effort=Decimal("0.00"),
+            created_by=self.owner,
+        )
+        blank_task = Task.objects.create(
+            project=self.project,
+            title="Blank effort",
+            created_by=self.owner,
+        )
+
+        zero_task.refresh_from_db()
+        blank_task.refresh_from_db()
+        self.assertEqual(zero_task.estimated_effort, Decimal("0.00"))
+        self.assertEqual(zero_task.actual_effort, Decimal("0.00"))
+        self.assertIsNone(blank_task.estimated_effort)
+        self.assertIsNone(blank_task.actual_effort)
+
+    def test_negative_effort_values_are_rejected_by_database_constraints(self):
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Negative estimate",
+                            estimated_effort=Decimal("-0.01"),
+                            created_by=self.owner,
+                        )
+                    ]
+                )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                Task.objects.bulk_create(
+                    [
+                        Task(
+                            project=self.project,
+                            title="Negative actual",
+                            actual_effort=Decimal("-0.01"),
+                            created_by=self.owner,
+                        )
+                    ]
+                )
 
     def test_task_assignee_validation_must_be_project_member(self):
         task = Task(
@@ -302,6 +364,8 @@ class TaskFormTests(TestCase):
                 "description": "Ensure 100% test coverage.",
                 "priority": "HIGH",
                 "due_date": "2026-12-31",
+                "estimated_effort": "4.25",
+                "actual_effort": "3.50",
                 "assignee": str(self.member.pk),
                 "status": "IN_PROGRESS",
                 "labels": "testing, Quality, Backend",
@@ -317,6 +381,8 @@ class TaskFormTests(TestCase):
         self.assertEqual(task.title, "Write unit tests")
         self.assertEqual(task.assignee, self.member)
         self.assertEqual(task.priority, Task.Priority.HIGH)
+        self.assertEqual(task.estimated_effort, Decimal("4.25"))
+        self.assertEqual(task.actual_effort, Decimal("3.50"))
         self.assertEqual(task.status, Task.Status.IN_PROGRESS)
         self.assertEqual(task.labels.count(), 3)
         self.assertEqual(
@@ -398,6 +464,46 @@ class TaskFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("priority", form.errors)
 
+    def test_task_form_validates_effort_values_and_precision(self):
+        valid_form = TaskForm(
+            data={
+                "title": "Effort form task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "2.50",
+                "actual_effort": "3.75",
+            },
+            project=self.project,
+        )
+        negative_form = TaskForm(
+            data={
+                "title": "Negative effort task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "-0.01",
+            },
+            project=self.project,
+        )
+        precision_form = TaskForm(
+            data={
+                "title": "Precise effort task",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.TODO,
+                "estimated_effort": "1.234",
+            },
+            project=self.project,
+        )
+
+        self.assertTrue(valid_form.is_valid(), valid_form.errors)
+        self.assertEqual(
+            valid_form.cleaned_data["estimated_effort"], Decimal("2.50")
+        )
+        self.assertEqual(valid_form.cleaned_data["actual_effort"], Decimal("3.75"))
+        self.assertFalse(negative_form.is_valid())
+        self.assertIn("estimated_effort", negative_form.errors)
+        self.assertFalse(precision_form.is_valid())
+        self.assertIn("estimated_effort", precision_form.errors)
+
     def test_actual_task_form_renders_field_and_non_field_errors(self):
         form = TaskForm(
             data={
@@ -476,6 +582,8 @@ class TaskFormTests(TestCase):
                 "title": "Initial Task Updated",
                 "priority": "MEDIUM",
                 "status": "DONE",
+                "estimated_effort": "8.00",
+                "actual_effort": "10.25",
                 "labels": "v1, hotfix",
             },
             instance=task,
@@ -484,6 +592,8 @@ class TaskFormTests(TestCase):
         updated_task = update_form.save()
 
         self.assertEqual(updated_task.status, Task.Status.DONE)
+        self.assertEqual(updated_task.estimated_effort, Decimal("8.00"))
+        self.assertEqual(updated_task.actual_effort, Decimal("10.25"))
         self.assertEqual(
             set(updated_task.labels.values_list("name", flat=True)),
             {"v1", "hotfix"},
@@ -576,6 +686,27 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
 
+    def test_task_detail_and_list_display_effort_values(self):
+        self.task.estimated_effort = Decimal("4.25")
+        self.task.actual_effort = Decimal("5.50")
+        self.task.save()
+        self.client.force_login(self.member)
+
+        detail_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        list_response = self.client.get(
+            reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
+        )
+
+        self.assertContains(detail_response, "4.25 hours")
+        self.assertContains(detail_response, "5.50 hours")
+        self.assertContains(list_response, "4.25h")
+        self.assertContains(list_response, "5.50h")
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
@@ -587,6 +718,8 @@ class TaskViewAndPermissionTests(TestCase):
                 "description": "Detailed explanation",
                 "priority": "CRITICAL",
                 "due_date": "2026-11-15",
+                "estimated_effort": "6.00",
+                "actual_effort": "7.25",
                 "assignee": str(self.member.pk),
                 "status": "TODO",
                 "labels": "audit, core",
@@ -596,6 +729,8 @@ class TaskViewAndPermissionTests(TestCase):
 
         created_task = Task.objects.get(title="New Manager Task")
         self.assertEqual(created_task.priority, Task.Priority.CRITICAL)
+        self.assertEqual(created_task.estimated_effort, Decimal("6.00"))
+        self.assertEqual(created_task.actual_effort, Decimal("7.25"))
         self.assertEqual(created_task.created_by, self.owner)
         self.assertEqual(created_task.assignee, self.member)
         self.assertEqual(
@@ -658,6 +793,8 @@ class TaskViewAndPermissionTests(TestCase):
                 "description": "Updated progress notes",
                 "priority": "HIGH",
                 "due_date": "",
+                "estimated_effort": "8.00",
+                "actual_effort": "9.50",
                 "assignee": str(self.member.pk),
                 "status": "IN_PROGRESS",
                 "labels": "security, in-review",
@@ -668,6 +805,8 @@ class TaskViewAndPermissionTests(TestCase):
         self.task.refresh_from_db()
         self.assertEqual(self.task.title, "First Secure Task (In Progress)")
         self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
+        self.assertEqual(self.task.estimated_effort, Decimal("8.00"))
+        self.assertEqual(self.task.actual_effort, Decimal("9.50"))
         self.assertEqual(
             set(self.task.labels.values_list("name", flat=True)),
             {"security", "in-review"},

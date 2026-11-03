@@ -35,6 +35,8 @@
             <span><span class="task-meta-label">Priority</span><strong>{{ task.get_priority_display }}</strong></span>
             <span><span class="task-meta-label">Assignee</span><strong>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</strong></span>
             <span><span class="task-meta-label">Due date</span><strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
+            <span><span class="task-meta-label">Estimate</span><strong>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
+            <span><span class="task-meta-label">Actual</span><strong>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
         </div>
         {% if task.labels.all %}
         <div class="task-labels-list">

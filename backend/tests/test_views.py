@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.db import IntegrityError
@@ -122,6 +123,67 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No projects to show yet")
         self.assertContains(response, "Create your first project")
+
+    def test_dashboard_aggregates_visible_project_effort_and_defaults_missing_values(self):
+        effort_project = Project.objects.create(
+            name="Effort project",
+            owner=self.owner,
+        )
+        empty_project = Project.objects.create(
+            name="Empty effort project",
+            owner=self.owner,
+        )
+        hidden_owner = create_user(
+            "hidden-effort@example.com",
+            "hidden-effort",
+            "Hidden Effort Owner",
+        )
+        hidden_project = Project.objects.create(
+            name="Hidden effort project",
+            owner=hidden_owner,
+        )
+        Task.objects.create(
+            project=effort_project,
+            title="Estimated and actual",
+            created_by=self.owner,
+            estimated_effort=Decimal("3.25"),
+            actual_effort=Decimal("4.50"),
+        )
+        Task.objects.create(
+            project=effort_project,
+            title="Estimated only",
+            created_by=self.owner,
+            estimated_effort=Decimal("1.75"),
+        )
+        Task.objects.create(
+            project=hidden_project,
+            title="Hidden effort",
+            created_by=hidden_owner,
+            estimated_effort=Decimal("99.00"),
+            actual_effort=Decimal("99.00"),
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        effort_summary = next(
+            project
+            for project in response.context["projects"]
+            if project == effort_project
+        )
+        empty_summary = next(
+            project
+            for project in response.context["projects"]
+            if project == empty_project
+        )
+        self.assertEqual(effort_summary.total_estimated_effort, Decimal("5.00"))
+        self.assertEqual(effort_summary.total_actual_effort, Decimal("4.50"))
+        self.assertEqual(empty_summary.total_estimated_effort, Decimal("0.00"))
+        self.assertEqual(empty_summary.total_actual_effort, Decimal("0.00"))
+        self.assertContains(response, "5.00 hours")
+        self.assertContains(response, "4.50 hours")
+        self.assertNotContains(response, "Hidden effort project")
 
     def test_dashboard_includes_all_visible_projects(self):
         for index in range(6):

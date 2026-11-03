@@ -8,6 +8,24 @@ User = get_user_model()
 
 
 class TaskForm(forms.ModelForm):
+    estimated_effort = forms.DecimalField(
+        required=False,
+        max_digits=7,
+        decimal_places=2,
+        min_value=0,
+        label="Estimated effort (hours)",
+        help_text="Optional decimal hours, such as 2.50 for two and a half hours.",
+        widget=forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+    )
+    actual_effort = forms.DecimalField(
+        required=False,
+        max_digits=7,
+        decimal_places=2,
+        min_value=0,
+        label="Actual effort (hours)",
+        help_text="Optional decimal hours recorded for work completed.",
+        widget=forms.NumberInput(attrs={"step": "0.01", "min": "0"}),
+    )
     labels = forms.CharField(
         required=False,
         help_text="Comma-separated labels (e.g. bug, frontend, urgent).",
@@ -23,6 +41,8 @@ class TaskForm(forms.ModelForm):
             "description",
             "priority",
             "due_date",
+            "estimated_effort",
+            "actual_effort",
             "assignee",
             "status",
         ]

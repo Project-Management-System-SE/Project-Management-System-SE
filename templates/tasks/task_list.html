@@ -38,6 +38,14 @@
             <strong>Due date:</strong>
             {% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
         </p>
+        <p>
+            <strong>Estimated effort:</strong>
+            {% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }} hours{% else %}Not set{% endif %}
+        </p>
+        <p>
+            <strong>Actual effort:</strong>
+            {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }} hours{% else %}Not set{% endif %}
+        </p>
     </li>
     {% endfor %}
 </ul>

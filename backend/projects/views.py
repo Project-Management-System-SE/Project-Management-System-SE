@@ -2,7 +2,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -40,6 +41,16 @@ def dashboard(request):
     projects = list(
         visible_projects.annotate(
             total_task_count=Count("tasks", distinct=True),
+            total_estimated_effort=Coalesce(
+                Sum("tasks__estimated_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            total_actual_effort=Coalesce(
+                Sum("tasks__actual_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
             **{
                 f"{status_value.lower()}_task_count": count
                 for status_value, count in status_counts.items()

@@ -43,6 +43,14 @@
             <p>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</p>
         </div>
         <div>
+            <strong>Estimated effort:</strong>
+            <p>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }} hours{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
+            <strong>Actual effort:</strong>
+            <p>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }} hours{% else %}Not set{% endif %}</p>
+        </div>
+        <div>
             <strong>Created by:</strong>
             <p>{{ task.created_by.full_name|default:task.created_by.email }}</p>
         </div>

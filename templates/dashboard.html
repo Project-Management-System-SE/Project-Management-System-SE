@@ -75,6 +75,11 @@
             </div>
             <div class="project-task-summary">
                 <strong>{{ project.total_task_count }} task{{ project.total_task_count|pluralize }}</strong>
+                <p class="project-effort-summary">
+                    Estimated: {{ project.total_estimated_effort|floatformat:2 }} hours
+                    &middot;
+                    Actual: {{ project.total_actual_effort|floatformat:2 }} hours
+                </p>
                 <ul class="status-breakdown" aria-label="Task status breakdown">
                     {% for status in project.status_breakdown %}
                     <li><span>{{ status.label }}</span><strong>{{ status.count }}</strong></li>

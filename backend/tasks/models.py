@@ -67,6 +67,18 @@ class Task(models.Model):
         choices=Status.choices,
         default=Status.TODO,
     )
+    estimated_effort = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    actual_effort = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
     due_date = models.DateField(null=True, blank=True)
     assignee = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -101,6 +113,20 @@ class Task(models.Model):
                     priority__in=["LOW", "MEDIUM", "HIGH", "CRITICAL"]
                 ),
                 name="task_priority_valid_choice",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(estimated_effort__isnull=True)
+                    | models.Q(estimated_effort__gte=0)
+                ),
+                name="task_estimated_effort_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(actual_effort__isnull=True)
+                    | models.Q(actual_effort__gte=0)
+                ),
+                name="task_actual_effort_non_negative",
             ),
         ]
         indexes = [
