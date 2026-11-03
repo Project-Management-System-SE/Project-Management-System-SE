@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -62,10 +63,13 @@ class ReportMetricsTests(TestCase):
         self.assertEqual(metrics["effort_variance"], Decimal("-2.50"))
 
     def test_sprint_velocity_calculation(self):
+        today = datetime.date.today()
         sprint = Sprint.objects.create(
             project=self.project,
             name="Sprint 1",
             status=Sprint.Status.COMPLETED,
+            start_date=today - datetime.timedelta(days=14),
+            end_date=today,
         )
         Task.objects.create(
             title="Sprint Task",

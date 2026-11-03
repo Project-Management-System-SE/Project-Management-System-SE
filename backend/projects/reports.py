@@ -22,7 +22,6 @@ def get_project_progress_metrics(project, start_date=None, end_date=None, sprint
     total_tasks = tasks_qs.count()
     completed_tasks = tasks_qs.filter(status=Task.Status.DONE).count()
     in_progress_tasks = tasks_qs.filter(status=Task.Status.IN_PROGRESS).count()
-    in_review_tasks = tasks_qs.filter(status=Task.Status.IN_REVIEW).count()
     todo_tasks = tasks_qs.filter(status=Task.Status.TODO).count()
 
     completion_rate = (
@@ -44,7 +43,6 @@ def get_project_progress_metrics(project, start_date=None, end_date=None, sprint
         "total_tasks": total_tasks,
         "completed_tasks": completed_tasks,
         "in_progress_tasks": in_progress_tasks,
-        "in_review_tasks": in_review_tasks,
         "todo_tasks": todo_tasks,
         "completion_rate": completion_rate,
         "total_estimated": total_estimated,
@@ -109,7 +107,7 @@ def get_team_workload_metrics(project):
         total = user_tasks.count()
         completed = user_tasks.filter(status=Task.Status.DONE).count()
         active = user_tasks.filter(
-            status__in=[Task.Status.TODO, Task.Status.IN_PROGRESS, Task.Status.IN_REVIEW]
+            status__in=[Task.Status.TODO, Task.Status.IN_PROGRESS]
         ).count()
         est = user_tasks.aggregate(s=Sum("estimated_effort"))["s"] or Decimal("0.00")
         act = user_tasks.aggregate(s=Sum("actual_effort"))["s"] or Decimal("0.00")
@@ -209,7 +207,6 @@ def generate_summary_report_csv(project):
     writer.writerow(["Total Tasks", progress["total_tasks"]])
     writer.writerow(["Completed Tasks", progress["completed_tasks"]])
     writer.writerow(["In Progress Tasks", progress["in_progress_tasks"]])
-    writer.writerow(["In Review Tasks", progress["in_review_tasks"]])
     writer.writerow(["To Do Tasks", progress["todo_tasks"]])
     writer.writerow(["Completion Rate", f"{progress['completion_rate']}%"])
     writer.writerow(["Total Estimated Hours", progress["total_estimated"]])

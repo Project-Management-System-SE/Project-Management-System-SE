@@ -44,8 +44,8 @@
         <span class="text-muted">{{ progress.completed_tasks }} / {{ progress.total_tasks }} tasks</span>
     </div>
     <div class="card stat-card">
-        <span class="stat-label">In Progress / Review</span>
-        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #3b82f6;">{{ progress.in_progress_tasks|add:progress.in_review_tasks }}</span>
+        <span class="stat-label">In Progress</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #3b82f6;">{{ progress.in_progress_tasks }}</span>
         <span class="text-muted">Active tasks in flight</span>
     </div>
     <div class="card stat-card">
