@@ -225,3 +225,51 @@ def task_status_api(request, task_id):
     task.status = new_status
     task.save()
     return success_response(serialize_task(task), message="Task status updated successfully.")
+
+
+@csrf_exempt
+@api_auth_required
+@require_http_methods(["GET"])
+def sprint_list_api(request, project_id):
+    try:
+        project = visible_projects_for(request.user).get(pk=project_id)
+    except Project.DoesNotExist:
+        return error_response("Project not found or access denied.", status=404)
+
+    sprints = project.sprints.all().order_by("start_date", "pk")
+    data = [
+        {
+            "id": s.pk,
+            "name": s.name,
+            "status": s.status,
+            "goal": s.goal,
+            "start_date": s.start_date.isoformat() if s.start_date else None,
+            "end_date": s.end_date.isoformat() if s.end_date else None,
+            "task_count": s.tasks.count(),
+        }
+        for s in sprints
+    ]
+    return success_response({"sprints": data, "count": len(data)})
+
+
+@csrf_exempt
+@api_auth_required
+@require_http_methods(["GET"])
+def milestone_list_api(request, project_id):
+    try:
+        project = visible_projects_for(request.user).get(pk=project_id)
+    except Project.DoesNotExist:
+        return error_response("Project not found or access denied.", status=404)
+
+    milestones = project.milestones.all().order_by("due_date", "pk")
+    data = [
+        {
+            "id": m.pk,
+            "name": m.name,
+            "description": m.description,
+            "due_date": m.due_date.isoformat() if m.due_date else None,
+            "task_count": m.tasks.count(),
+        }
+        for m in milestones
+    ]
+    return success_response({"milestones": data, "count": len(data)})

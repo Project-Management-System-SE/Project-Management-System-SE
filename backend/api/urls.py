@@ -9,4 +9,6 @@ urlpatterns = [
     path("projects/<int:project_id>/tasks/", views.task_list_create_api, name="project-tasks"),
     path("tasks/<int:task_id>/", views.task_detail_api, name="task-detail"),
     path("tasks/<int:task_id>/status/", views.task_status_api, name="task-status"),
+    path("projects/<int:project_id>/sprints/", views.sprint_list_api, name="project-sprints"),
+    path("projects/<int:project_id>/milestones/", views.milestone_list_api, name="project-milestones"),
 ]
