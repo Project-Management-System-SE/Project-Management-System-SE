@@ -1,3 +1,4 @@
+from .docs import openapi_spec_api, api_docs_viewer
 from django.urls import path
 from . import views
 
@@ -11,4 +12,6 @@ urlpatterns = [
     path("tasks/<int:task_id>/status/", views.task_status_api, name="task-status"),
     path("projects/<int:project_id>/sprints/", views.sprint_list_api, name="project-sprints"),
     path("projects/<int:project_id>/milestones/", views.milestone_list_api, name="project-milestones"),
+    path("openapi.json", openapi_spec_api, name="openapi-spec"),
+    path("docs/", api_docs_viewer, name="api-docs"),
 ]
