@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Activity history | {{ project_name }} | PMS{% endblock %}
+
+{% block page_heading %}<h1>{{ project_name }} activity history</h1>{% endblock %}
+
+{% block content %}
+<section class="projects-intro">
+    <div>
+        <h2>Activity history</h2>
+        <p>Project and task changes, newest first.</p>
+    </div>
+    {% if project %}
+    <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">Back to project</a>
+    {% else %}
+    <span class="status status-neutral">Deleted project history</span>
+    {% endif %}
+</section>
+
+<section class="card" aria-label="Project activity">
+    {% if activity %}
+    <ol class="projects-list">
+        {% for entry in activity %}
+        <li class="project-list-card">
+            <div class="project-list-heading">
+                <strong>{{ entry.get_action_display }} {{ entry.get_object_type_display|lower }}: {{ entry.object_name }}</strong>
+                <time datetime="{{ entry.timestamp|date:'c' }}">{{ entry.timestamp|date:"M j, Y H:i" }}</time>
+            </div>
+            <p>{{ entry.description }}</p>
+            <small>Actor: {{ entry.actor_name|default:"Deleted user" }}</small>
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
+    <p>No activity recorded yet.</p>
+    {% endif %}
+</section>
+
+{% if page_obj.has_other_pages %}
+<nav aria-label="Activity pages">
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">Previous</a>{% endif %}
+    <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

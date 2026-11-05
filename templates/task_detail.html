@@ -16,6 +16,9 @@
         {% if can_edit_task %}
         <a class="button" href="{% url 'tasks:task-update' project.pk task.pk %}">Edit task</a>
         {% endif %}
+        {% if can_manage_project %}
+        <a class="button button-secondary" href="{% url 'tasks:task-delete' project.pk task.pk %}">Delete task</a>
+        {% endif %}
         <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}">Back to task list</a>
     </div>
 </section>

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Delete {{ task.title }} | PMS{% endblock %}
+
+{% block page_heading %}<h1>Delete task</h1>{% endblock %}
+
+{% block content %}
+<section class="card" aria-labelledby="delete-task-heading">
+    <h2 id="delete-task-heading">Delete “{{ task.title }}”?</h2>
+    <p>This permanently deletes the task. Its activity history will be retained.</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="project-form-actions">
+            <button type="submit">Confirm delete</button>
+            <a class="button button-secondary" href="{% url 'tasks:task-detail' project.pk task.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}
