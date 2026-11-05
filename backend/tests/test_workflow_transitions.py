@@ -35,12 +35,12 @@ class WorkflowTransitionTests(TestCase):
 
     def test_default_valid_transitions(self):
         self.assertTrue(is_valid_transition(self.project, "TODO", "IN_PROGRESS"))
-        self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "IN_REVIEW"))
-        self.assertTrue(is_valid_transition(self.project, "IN_REVIEW", "DONE"))
+        self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "DONE"))
+        self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "TODO"))
+        self.assertTrue(is_valid_transition(self.project, "DONE", "IN_PROGRESS"))
 
     def test_default_invalid_transitions(self):
         self.assertFalse(is_valid_transition(self.project, "TODO", "DONE"))
-        self.assertFalse(is_valid_transition(self.project, "TODO", "IN_REVIEW"))
         self.assertFalse(is_valid_transition(self.project, "DONE", "TODO"))
 
     def test_same_status_is_always_valid(self):
