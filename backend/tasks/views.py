@@ -196,9 +196,6 @@ def task_create(request, project_id):
     if request.method == "POST":
         form = TaskForm(request.POST, project=project)
         if form.is_valid():
-            new_assignee = form.cleaned_data.get("assignee")
-            if new_assignee != task.assignee and not can_reassign_task(request.user, task):
-                raise PermissionDenied("You do not have permission to reassign this task.")
             with transaction.atomic():
                 task = form.save(commit=False)
                 task.project = project
@@ -389,7 +386,7 @@ def task_update_status(request, project_id, task_id):
     if status_form.is_valid():
         previous_status = task.status
         new_status = status_form.cleaned_data["status"]
-        if not is_valid_transition(task.project, previous_status, new_status):
+        if not is_valid_transition(task.project, previous_status, new_status, user=request.user):
             messages.error(
                 request,
                 f"Transition from '{task.get_status_display()}' to '{new_status}' is not permitted by project workflow rules."
