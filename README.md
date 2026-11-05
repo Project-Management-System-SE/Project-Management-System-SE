@@ -208,3 +208,41 @@ task is due. Registration confirmation and password-reset messages continue to u
 Run `python backend/manage.py send_due_date_reminders` daily to create due-date reminders. Schedule
 this command with Windows Task Scheduler or a deployment scheduler; the command records sent
 reminders so repeated runs do not create duplicates.
+
+
+---
+
+## Sprint 2 & 3 Features Implementation
+
+### 1. Task Permissions and Validation (#19)
+- Server-side permission predicates for task operations (`can_reassign_task`, `can_delete_task`, `can_edit_task`).
+- Membership-restricted task assignment validation.
+- Detailed documentation: [Task Permissions Matrix](docs/task_permissions_matrix.md).
+
+### 2. Configurable Project Workflows & Transition Enforcement (#39)
+- Custom state machine rules per project with `ProjectWorkflowTransition` model.
+- Backend enforcement engine rejecting illegal transitions.
+- Interactive workflow settings UI for Project Managers.
+- Detailed documentation: [Workflow Management](docs/workflow_management.md).
+
+### 3. Downloadable Project Reports (#45)
+- Project progress KPIs, sprint delivery velocity, and team workload allocation metrics.
+- Export formats: Detailed Tasks CSV and Executive Summary CSV.
+- Detailed documentation: [Reports Specification](docs/reports_specification.md).
+
+### 4. REST API and External Integrations (#47)
+- Authenticated REST endpoints for projects, tasks, sprints, and milestones.
+- API Token header authentication mechanism.
+- OpenAPI 3.0 interactive documentation viewer at `/api/v1/docs/`.
+- Detailed documentation: [API Documentation](docs/api_documentation.md).
+
+### 5. Production Database Configuration (#48)
+- Dynamic database dialect support (PostgreSQL, MySQL, SQLite) via environment variables.
+- Health check diagnostic command: `python backend/manage.py check_db_connection`.
+- Detailed documentation: [Database Configuration](docs/database_configuration.md).
+
+### 6. Production Security Baseline & Verification (#50)
+- Security headers, HSTS, SSL redirect, and HTTP-only cookie configuration.
+- Automated security audit command: `python backend/manage.py verify_production_security`.
+- Production environment template: `.env.example`.
+- Detailed documentation: [Production Security](docs/production_security.md).
