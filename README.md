@@ -154,6 +154,19 @@ own membership. Deletion requires confirmation and removes the project and its m
 the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
 requests.
 
+Project and task creations, updates, status changes, sprint carry-over changes, and deletions are
+retained in the project activity history. Authorized project users can view live project history
+newest first; authorized users retained in the deletion event can also open a deleted project's
+history by its original project ID. Audit rows retain project/task IDs and names, actor snapshots,
+and project authorization snapshots when related records are deleted. There is no automatic
+expiration, so retention follows the lifetime of the PMS database.
+
+Audit entries are append-only at the Django application layer: model saves/deletes, queryset
+updates/deletes, bulk updates, and bulk creates are rejected after creation, and the admin exposes
+entries as read-only with deletion disabled. This is not database-level tamper protection; a
+database role with direct write access could bypass it. Production deployments requiring stronger
+tamper resistance should use database permissions, append-only storage, or an external audit sink.
+
 Open a project's **Tasks** page to switch between the task list and a status board. Task cards link
 to their details; users with task edit permission can update status and other task fields there.
 The dashboard counts tasks assigned to the signed-in user within visible projects, and project

@@ -5,12 +5,14 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config.notifications import create_notifications
-from tasks.models import Task
+from tasks.audit import changes_from_form, record_audit
+from tasks.models import AuditLog, Task
 
 from .forms import (
     MilestoneForm,
@@ -306,6 +308,7 @@ def sprint_close(request, project_id, sprint_id):
             sprint.tasks.exclude(status=Task.Status.DONE).select_for_update()
         )
         for task in incomplete_tasks:
+            previous_sprint_id = task.sprint_id
             SprintTaskHistory.objects.create(
                 task=task,
                 sprint=sprint,
@@ -319,6 +322,17 @@ def sprint_close(request, project_id, sprint_id):
             )
             task.sprint = destination
             task.save(update_fields=["sprint", "updated_at"])
+            record_audit(
+                request.user,
+                AuditLog.Action.UPDATE,
+                task,
+                changes={
+                    "sprint": {
+                        "from": previous_sprint_id,
+                        "to": destination.pk if destination else None,
+                    }
+                },
+            )
         sprint.status = Sprint.Status.COMPLETED
         sprint.save(update_fields=["status", "updated_at"])
     messages.success(request, "Sprint closed and incomplete tasks carried over.")
@@ -450,6 +464,7 @@ def project_create(request):
                     user=request.user,
                     project_role=ProjectMembership.Role.PROJECT_MANAGER,
                 )
+                record_audit(request.user, AuditLog.Action.CREATE, project)
 
             messages.success(request, "Project created successfully.")
             return redirect("projects:project-list")
@@ -483,6 +498,44 @@ def project_detail(request, project_id):
 
 
 @login_required
+def project_activity(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is not None:
+        activity = AuditLog.objects.filter(
+            project=project
+        ).select_related("actor", "task")
+        context = {"project": project, "project_name": project.name}
+    else:
+        deletion_entry = AuditLog.objects.filter(
+            object_type=AuditLog.ObjectType.PROJECT,
+            object_id=project_id,
+            project_id__isnull=True,
+        ).order_by("-timestamp", "-pk").first()
+        if deletion_entry is None or (
+            not request.user.is_admin
+            and request.user.pk not in deletion_entry.authorized_user_ids
+        ):
+            raise Http404
+        activity = AuditLog.objects.filter(
+            project_id_snapshot=project_id
+        ).select_related("actor", "task")
+        context = {
+            "project": None,
+            "project_name": deletion_entry.project_name,
+            "deleted_project": True,
+        }
+    page_obj = Paginator(activity.order_by("-timestamp", "-pk"), 50).get_page(
+        request.GET.get("page")
+    )
+    context.update({"activity": page_obj, "page_obj": page_obj})
+    return render(
+        request,
+        "project_activity.html",
+        context,
+    )
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def project_update(request, project_id):
     project = _manageable_project_or_403(request.user, project_id)
@@ -491,8 +544,16 @@ def project_update(request, project_id):
         form = ProjectUpdateForm(request.POST, instance=project)
         if form.is_valid():
             with transaction.atomic():
+                changes = changes_from_form(form)
                 form.save()
                 ensure_project_owner_membership(project)
+                if changes:
+                    record_audit(
+                        request.user,
+                        AuditLog.Action.UPDATE,
+                        project,
+                        changes=changes,
+                    )
             messages.success(request, "Project details updated successfully.")
             return redirect("projects:project-detail", project_id=project.pk)
     else:
@@ -595,8 +656,21 @@ def project_remove_member(request, project_id, membership_id):
 def project_archive(request, project_id):
     project = _manageable_project_or_403(request.user, project_id)
     if project.status != Project.Status.ARCHIVED:
+        previous_status = project.status
         project.status = Project.Status.ARCHIVED
-        project.save(update_fields=["status", "updated_at"])
+        with transaction.atomic():
+            project.save(update_fields=["status", "updated_at"])
+            record_audit(
+                request.user,
+                AuditLog.Action.UPDATE,
+                project,
+                changes={
+                    "status": {
+                        "from": previous_status,
+                        "to": project.status,
+                    }
+                },
+            )
     messages.success(request, "Project archived successfully.")
     return redirect("projects:project-detail", project_id=project.pk)
 
@@ -608,7 +682,9 @@ def project_delete(request, project_id):
 
     if request.method == "POST":
         project_name = project.name
-        project.delete()
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, project)
+            project.delete()
         messages.success(request, f"{project_name} was deleted.")
         return redirect("projects:project-list")
 

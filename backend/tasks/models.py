@@ -7,7 +7,7 @@ import zlib
 from pathlib import Path
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
@@ -358,6 +358,96 @@ class Task(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.project.name})"
+
+
+class AuditLogQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise PermissionDenied("Audit entries cannot be updated.")
+
+    def delete(self):
+        raise PermissionDenied("Audit entries cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise PermissionDenied("Audit entries cannot be updated.")
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, **kwargs):
+        raise PermissionDenied(
+            "Audit entries must be created through the audit recorder."
+        )
+
+
+class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):
+    pass
+
+
+class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATE = "CREATE", "Created"
+        UPDATE = "UPDATE", "Updated"
+        DELETE = "DELETE", "Deleted"
+
+    class ObjectType(models.TextChoices):
+        PROJECT = "PROJECT", "Project"
+        TASK = "TASK", "Task"
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    actor_name = models.CharField(max_length=255, blank=True)
+    action = models.CharField(max_length=10, choices=Action.choices)
+    object_type = models.CharField(max_length=10, choices=ObjectType.choices)
+    object_id = models.PositiveBigIntegerField(null=True, blank=True)
+    object_name = models.CharField(max_length=250)
+    project_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    project = models.ForeignKey(
+        "projects.Project",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    project_name = models.CharField(max_length=200, blank=True)
+    authorized_user_ids = models.JSONField(default=list, blank=True)
+    task = models.ForeignKey(
+        "tasks.Task",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    timestamp = models.DateTimeField(auto_now_add=True)
+    description = models.TextField()
+    changes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-timestamp", "-pk"]
+        indexes = [
+            models.Index(
+                fields=["project", "-timestamp"],
+                name="audit_project_timestamp_idx",
+            ),
+            models.Index(
+                fields=["object_type", "object_id"],
+                name="audit_object_idx",
+            ),
+        ]
+
+    objects = AuditLogManager()
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise PermissionDenied("Audit entries are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionDenied("Audit entries cannot be deleted.")
+
+    def __str__(self):
+        return f"{self.get_action_display()} {self.object_type.lower()} {self.object_name}"
 
 
 class TaskComment(models.Model):

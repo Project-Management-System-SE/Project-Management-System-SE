@@ -10,9 +10,9 @@ from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
-from projects.permissions import visible_projects_for
+from projects.permissions import can_manage_project, visible_projects_for
 
 from .forms import (
     TaskAttachmentForm,
@@ -21,7 +21,8 @@ from .forms import (
     TaskForm,
     TaskStatusForm,
 )
-from .models import Task, TaskAttachment, TaskComment, UserNotification
+from .models import AuditLog, Task, TaskAttachment, TaskComment, UserNotification
+from .audit import changes_from_form, record_audit
 from .notifications import (
     notify_task_assignment,
     notify_task_comment,
@@ -57,6 +58,7 @@ def _task_detail_context(
         "project": task.project,
         "task": task,
         "can_edit_task": can_edit,
+        "can_manage_project": can_manage_project(request.user, task.project),
         "can_update_status": can_edit,
         "status_form": (
             status_form
@@ -197,6 +199,7 @@ def task_create(request, project_id):
                 task.created_by = request.user
                 task.save()
                 form.save_m2m()
+                record_audit(request.user, AuditLog.Action.CREATE, task)
                 if task.assignee_id:
                     notify_task_assignment(task)
             messages.success(request, f"Task '{task.title}' created successfully.")
@@ -329,7 +332,15 @@ def task_update(request, project_id, task_id):
         form = TaskForm(request.POST, instance=task, project=project)
         if form.is_valid():
             with transaction.atomic():
+                changes = changes_from_form(form)
                 task = form.save()
+                if changes:
+                    record_audit(
+                        request.user,
+                        AuditLog.Action.UPDATE,
+                        task,
+                        changes=changes,
+                    )
                 if task.assignee_id and task.assignee_id != previous_assignee_id:
                     notify_task_assignment(task)
                 if task.status != previous_status:
@@ -375,6 +386,17 @@ def task_update_status(request, project_id, task_id):
         with transaction.atomic():
             task.save()
             if task.status != previous_status:
+                record_audit(
+                    request.user,
+                    AuditLog.Action.UPDATE,
+                    task,
+                    changes={
+                        "status": {
+                            "from": previous_status,
+                            "to": task.status,
+                        }
+                    },
+                )
                 notify_task_status_change(task, request.user)
         messages.success(request, "Task status updated.")
         return redirect(
@@ -389,6 +411,25 @@ def task_update_status(request, project_id, task_id):
         _task_detail_context(request, task, status_form=status_form),
         status=400,
     )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def task_delete(request, project_id, task_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    task = get_object_or_404(project.tasks, pk=task_id)
+    if not can_manage_project(request.user, project):
+        raise PermissionDenied("You do not have permission to delete this task.")
+
+    if request.method == "POST":
+        task_name = task.title
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, task)
+            task.delete()
+        messages.success(request, f"{task_name} was deleted.")
+        return redirect("tasks:task-list", project_id=project.pk)
+
+    return render(request, "task_confirm_delete.html", {"project": project, "task": task})
 
 
 @login_required

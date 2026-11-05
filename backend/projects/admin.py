@@ -1,4 +1,8 @@
 from django.contrib import admin
+from django.db import transaction
+
+from tasks.audit import changes_from_form, record_audit
+from tasks.models import AuditLog
 
 from .models import Milestone, Project, ProjectMembership, Sprint, SprintTaskHistory
 
@@ -14,6 +18,19 @@ class ProjectAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     search_fields = ("name", "description", "owner__username", "owner__email")
     inlines = [ProjectMembershipInline]
+
+    def save_model(self, request, obj, form, change):
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            action = AuditLog.Action.UPDATE if change else AuditLog.Action.CREATE
+            changes = changes_from_form(form) if change else None
+            if not change or changes:
+                record_audit(request.user, action, obj, changes=changes)
+
+    def delete_model(self, request, obj):
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, obj)
+            super().delete_model(request, obj)
 
 
 @admin.register(ProjectMembership)

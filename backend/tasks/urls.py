@@ -39,6 +39,11 @@ urlpatterns = [
         name="task-update",
     ),
     path(
+        "projects/<int:project_id>/tasks/<int:task_id>/delete/",
+        views.task_delete,
+        name="task-delete",
+    ),
+    path(
         "projects/<int:project_id>/tasks/<int:task_id>/status/",
         views.task_update_status,
         name="task-update-status",
