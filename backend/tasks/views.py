@@ -1,12 +1,14 @@
 import logging
+from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import redirect_to_login
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Q
-from django.http import FileResponse, Http404, JsonResponse
+from django.http import FileResponse, Http404, HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -30,6 +32,34 @@ from .notifications import (
 from .permissions import can_create_task_in, can_edit_task, can_view_tasks_for
 
 logger = logging.getLogger(__name__)
+
+
+def _task_status_request_required(view):
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        expects_json = "application/json" in request.headers.get("Accept", "")
+        if not request.user.is_authenticated:
+            if expects_json:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": "Your session has expired. Sign in and try again.",
+                    },
+                    status=401,
+                )
+            return redirect_to_login(request.get_full_path())
+
+        if request.method != "POST":
+            if expects_json:
+                return JsonResponse(
+                    {"success": False, "error": "POST requests are required."},
+                    status=405,
+                )
+            return HttpResponseNotAllowed(["POST"])
+
+        return view(request, *args, **kwargs)
+
+    return wrapped
 
 
 def _get_visible_task(user, project_id, task_id):
@@ -371,8 +401,7 @@ def task_update(request, project_id, task_id):
     return render(request, "task_form.html", context)
 
 
-@login_required
-@require_POST
+@_task_status_request_required
 def task_update_status(request, project_id, task_id):
     expects_json = "application/json" in request.headers.get("Accept", "")
     try:

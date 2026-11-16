@@ -55,6 +55,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+CSRF_FAILURE_VIEW = "config.csrf.csrf_failure"
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
