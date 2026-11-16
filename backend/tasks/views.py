@@ -6,7 +6,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import DatabaseError, transaction
 from django.db.models import Q
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -132,6 +132,17 @@ def task_list(request, project_id):
     page_obj = None
     if view_mode == "board":
         task_items = list(tasks)
+        for task in task_items:
+            task.can_update_status = can_edit_task(request.user, task)
+            if task.can_update_status:
+                status_form = TaskStatusForm(initial={"status": task.status})
+                status_form.fields["status"].widget.attrs.update(
+                    {
+                        "id": f"task-{task.pk}-status",
+                        "aria-label": f"Status for {task.title}",
+                    }
+                )
+                task.status_form = status_form
         task_columns = [
             {
                 "status": status,
@@ -363,9 +374,30 @@ def task_update(request, project_id, task_id):
 @login_required
 @require_POST
 def task_update_status(request, project_id, task_id):
-    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
-    task = get_object_or_404(project.tasks.select_related("assignee", "created_by"), pk=task_id)
+    expects_json = "application/json" in request.headers.get("Accept", "")
+    try:
+        project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+        task = get_object_or_404(
+            project.tasks.select_related("assignee", "created_by"),
+            pk=task_id,
+        )
+    except Http404:
+        if expects_json:
+            return JsonResponse(
+                {"success": False, "error": "This task is not available."},
+                status=404,
+            )
+        raise
+
     if not can_edit_task(request.user, task):
+        if expects_json:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "You do not have permission to update this task.",
+                },
+                status=403,
+            )
         raise PermissionDenied("You do not have permission to update this task.")
 
     status_form = TaskStatusForm(request.POST)
@@ -376,11 +408,29 @@ def task_update_status(request, project_id, task_id):
             task.save()
             if task.status != previous_status:
                 notify_task_status_change(task, request.user)
+        if expects_json:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "status": task.status,
+                    "status_display": task.get_status_display(),
+                    "message": "Task status updated.",
+                }
+            )
         messages.success(request, "Task status updated.")
         return redirect(
             "tasks:task-detail",
             project_id=project.pk,
             task_id=task.pk,
+        )
+
+    if expects_json:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": status_form.errors.get("status", ["Enter a valid status."])[0],
+            },
+            status=400,
         )
 
     return render(
