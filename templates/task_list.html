@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Tasks - {{ project.name }} | PMS{% endblock %}
 
@@ -48,17 +49,19 @@
 </form>
 
 {% if view_mode == 'board' %}
-<div class="task-board" aria-label="Tasks grouped by status">
+<p class="task-board-feedback" data-task-board-feedback role="status" aria-live="polite" hidden></p>
+<div class="task-board" aria-label="Tasks grouped by status" data-task-board>
     {% for column in task_columns %}
-    <section class="task-board-column" aria-labelledby="task-status-{{ forloop.counter }}">
+    <section class="task-board-column" aria-labelledby="task-status-heading-{{ forloop.counter }}"
+        id="task-status-{{ column.status }}" data-status-column="{{ column.status }}">
         <header class="task-board-column-heading">
-            <h3 id="task-status-{{ forloop.counter }}">{{ column.label }}</h3>
-            <span class="task-board-count">{{ column.tasks|length }}</span>
+            <h3 id="task-status-heading-{{ forloop.counter }}">{{ column.label }}</h3>
+            <span class="task-board-count" data-task-board-count>{{ column.tasks|length }}</span>
         </header>
-        {% if column.tasks %}
-        <ul class="task-board-cards">
+        <ul class="task-board-cards" data-task-board-cards>
+            {% if column.tasks %}
             {% for task in column.tasks %}
-            <li class="card task-board-card">
+            <li class="card task-board-card" data-task-card data-task-status="{{ task.status }}">
                 <h4><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h4>
                 <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
                 <div class="task-board-meta">
@@ -73,12 +76,24 @@
                     {% endfor %}
                 </div>
                 {% endif %}
+                {% if task.can_update_status %}
+                <form class="task-board-status-form" method="post"
+                    action="{% url 'tasks:task-update-status' project.pk task.pk %}"
+                    data-task-status-form>
+                    {% csrf_token %}
+                    <div class="form-field">
+                        <label for="{{ task.status_form.status.id_for_label }}">Status</label>
+                        {{ task.status_form.status }}
+                    </div>
+                    <button type="submit">Save status</button>
+                </form>
+                {% endif %}
             </li>
             {% endfor %}
+            {% else %}
+            <li class="task-board-empty">No tasks in this status.</li>
+            {% endif %}
         </ul>
-        {% else %}
-        <p class="task-board-empty">No tasks in this status.</p>
-        {% endif %}
     </section>
     {% endfor %}
 </div>
@@ -135,5 +150,11 @@
     <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
     {% endif %}
 </nav>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if view_mode == 'board' %}
+<script src="{% static 'js/task_board.js' %}" defer></script>
 {% endif %}
 {% endblock %}

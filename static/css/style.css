@@ -907,8 +907,45 @@ textarea::placeholder {
 
 .task-board-empty {
     margin: 0;
+    padding: 0.25rem;
     color: var(--color-muted);
     font-size: 0.9375rem;
+    list-style: none;
+}
+
+.task-board-status-form {
+    display: grid;
+    gap: 0.625rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.task-board-status-form .form-field {
+    margin-bottom: 0;
+}
+
+.task-board-feedback {
+    margin: 0 0 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-small);
+    background: var(--color-surface);
+}
+
+.task-board-feedback[hidden] {
+    display: none;
+}
+
+.task-board-feedback.is-error {
+    border-color: var(--color-danger);
+    color: var(--color-danger);
+    background: var(--color-danger-bg);
+}
+
+.task-board-feedback.is-success {
+    border-color: var(--color-success);
+    color: var(--color-success);
+    background: var(--color-success-bg);
 }
 
 .task-collaboration {
