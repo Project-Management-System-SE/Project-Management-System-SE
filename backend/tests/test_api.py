@@ -1,12 +1,13 @@
+import json
 from datetime import date
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import User
 from projects.models import Project, ProjectMembership, Sprint
-from tasks.models import Task, TaskLabel
+from tasks.models import AuditLog, Task, TaskLabel
 
 
 class ProjectTaskApiReadTests(TestCase):
@@ -138,3 +139,134 @@ class ProjectTaskApiReadTests(TestCase):
 
         self.assertEqual(project_response.status_code, 404)
         self.assertEqual(task_response.status_code, 404)
+
+    def test_project_member_can_create_audited_tasks(self):
+        self.client.force_login(self.member)
+
+        response = self.client.post(
+            reverse("api-project-task-list", args=[self.project.pk]),
+            data=json.dumps(
+                {
+                    "title": "Created through API",
+                    "priority": Task.Priority.HIGH,
+                    "assignee": self.member.pk,
+                    "estimated_effort": "1.50",
+                    "labels": ["integration", "api"],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        task = Task.objects.get(title="Created through API")
+        self.assertEqual(
+            response["Location"],
+            reverse("api-project-task-detail", args=[self.project.pk, task.pk]),
+        )
+        self.assertEqual(task.created_by, self.member)
+        self.assertEqual(
+            set(task.labels.values_list("name", flat=True)),
+            {"integration", "api"},
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(
+                task=task,
+                action=AuditLog.Action.CREATE,
+                actor=self.member,
+            ).exists()
+        )
+
+    def test_task_patch_validates_transitions_and_records_updates(self):
+        self.client.force_login(self.member)
+        url = reverse(
+            "api-project-task-detail",
+            args=[self.project.pk, self.task.pk],
+        )
+
+        response = self.client.patch(
+            url,
+            data=json.dumps(
+                {
+                    "priority": Task.Priority.CRITICAL,
+                    "status": Task.Status.IN_PROGRESS,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], Task.Status.IN_PROGRESS)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.priority, Task.Priority.CRITICAL)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                task=self.task,
+                action=AuditLog.Action.UPDATE,
+                actor=self.member,
+            ).exists()
+        )
+
+        invalid_response = self.client.patch(
+            url,
+            data=json.dumps({"status": Task.Status.DONE}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(invalid_response.status_code, 400)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
+
+    def test_task_delete_is_manager_only_and_audited(self):
+        self.client.force_login(self.member)
+        url = reverse(
+            "api-project-task-detail",
+            args=[self.project.pk, self.task.pk],
+        )
+
+        denied_response = self.client.delete(url)
+
+        self.assertEqual(denied_response.status_code, 403)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+        self.client.force_login(self.owner)
+
+        delete_response = self.client.delete(url)
+
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Task.objects.filter(pk=self.task.pk).exists())
+        self.assertTrue(
+            AuditLog.objects.filter(
+                object_id=self.task.pk,
+                action=AuditLog.Action.DELETE,
+                actor=self.owner,
+            ).exists()
+        )
+
+    def test_write_api_rejects_malformed_and_non_json_bodies(self):
+        self.client.force_login(self.member)
+        url = reverse("api-project-task-list", args=[self.project.pk])
+
+        malformed_response = self.client.post(
+            url,
+            data="{",
+            content_type="application/json",
+        )
+        unsupported_response = self.client.post(
+            url,
+            data="title=Task",
+            content_type="application/x-www-form-urlencoded",
+        )
+
+        self.assertEqual(malformed_response.status_code, 400)
+        self.assertEqual(unsupported_response.status_code, 415)
+
+    def test_write_api_requires_csrf_token_for_session_authentication(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.member)
+
+        response = client.post(
+            reverse("api-project-task-list", args=[self.project.pk]),
+            data=json.dumps({"title": "No CSRF"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)

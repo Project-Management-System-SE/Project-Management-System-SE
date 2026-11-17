@@ -1,16 +1,26 @@
+import json
 from functools import wraps
 
-from django.db.models import Count, Q
+from django.db import transaction
+from django.core.exceptions import ValidationError
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
-from django.http import JsonResponse
+from django.db.models import Count, Q
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 
-from projects.models import Project
-from projects.permissions import visible_projects_for
+from projects.permissions import can_manage_project, visible_projects_for
 
-from .forms import TaskFilterForm
-from .models import Task
-from .workflow import workflow_choices_for, workflow_status_key
+from .audit import changes_from_form, record_audit
+from .forms import TaskFilterForm, TaskForm
+from .models import AuditLog, Task
+from .notifications import notify_task_assignment, notify_task_status_change
+from .permissions import can_create_task_in, can_edit_task
+from .workflow import (
+    initial_workflow_status,
+    workflow_choices_for,
+    workflow_status_key,
+)
 
 
 def _api_login_required(view):
@@ -120,6 +130,117 @@ def _project_tasks(project):
     )
 
 
+def _read_json_object(request):
+    if request.content_type != "application/json":
+        return None, JsonResponse(
+            {"error": "Content-Type must be application/json."},
+            status=415,
+        )
+    try:
+        payload = json.loads(request.body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, JsonResponse({"error": "Request body is not valid JSON."}, status=400)
+    if not isinstance(payload, dict):
+        return None, JsonResponse(
+            {"error": "Request body must be a JSON object."},
+            status=400,
+        )
+    return payload, None
+
+
+def _task_form_data(payload, project, task=None):
+    allowed_fields = {
+        "title",
+        "description",
+        "priority",
+        "due_date",
+        "estimated_effort",
+        "actual_effort",
+        "sprint",
+        "milestone",
+        "assignee",
+        "status",
+        "labels",
+    }
+    unknown_fields = sorted(set(payload) - allowed_fields)
+    if unknown_fields:
+        return None, JsonResponse(
+            {
+                "error": "Unknown task fields.",
+                "details": {"fields": unknown_fields},
+            },
+            status=400,
+        )
+
+    data = (
+        {
+            "title": task.title,
+            "description": task.description,
+            "priority": task.priority,
+            "due_date": task.due_date.isoformat() if task.due_date else "",
+            "estimated_effort": (
+                str(task.estimated_effort)
+                if task.estimated_effort is not None
+                else ""
+            ),
+            "actual_effort": (
+                str(task.actual_effort)
+                if task.actual_effort is not None
+                else ""
+            ),
+            "sprint": task.sprint_id or "",
+            "milestone": task.milestone_id or "",
+            "assignee": task.assignee_id or "",
+            "status": workflow_status_key(task),
+            "labels": task.get_labels_as_string(),
+        }
+        if task
+        else {
+            "title": "",
+            "description": "",
+            "priority": Task.Priority.MEDIUM,
+            "due_date": "",
+            "estimated_effort": "",
+            "actual_effort": "",
+            "sprint": "",
+            "milestone": "",
+            "assignee": "",
+            "status": initial_workflow_status(project),
+            "labels": "",
+        }
+    )
+    if "labels" in payload:
+        labels = payload["labels"]
+        if not isinstance(labels, list) or not all(
+            isinstance(label, str) for label in labels
+        ):
+            return None, JsonResponse(
+                {"error": "labels must be an array of strings."},
+                status=400,
+            )
+        data["labels"] = ", ".join(labels)
+    data.update({key: value for key, value in payload.items() if key != "labels"})
+    return data, None
+
+
+def _task_form_error(form):
+    return JsonResponse(
+        {
+            "error": "Task validation failed.",
+            "details": form.errors.get_json_data(),
+        },
+        status=400,
+    )
+
+
+def _form_validation_error(error):
+    details = getattr(error, "message_dict", {"__all__": error.messages})
+    return JsonResponse(
+        {"error": "Task validation failed.", "details": details},
+        status=400,
+    )
+
+
 @_api_login_required
 @_api_methods("GET")
 def api_project_list(request):
@@ -147,9 +268,40 @@ def api_project_detail(request, project_id):
 
 
 @_api_login_required
-@_api_methods("GET")
+@_api_methods("GET", "POST")
 def api_project_task_list(request, project_id):
     project = _visible_project_or_404(request.user, project_id)
+    if request.method == "POST":
+        if not can_create_task_in(request.user, project):
+            return JsonResponse({"error": "You cannot create tasks in this project."}, status=403)
+        payload, error = _read_json_object(request)
+        if error:
+            return error
+        data, error = _task_form_data(payload, project)
+        if error:
+            return error
+        form = TaskForm(data=data, project=project)
+        if not form.is_valid():
+            return _task_form_error(form)
+        try:
+            with transaction.atomic():
+                task = form.save(commit=False)
+                task.project = project
+                task.created_by = request.user
+                task.save()
+                form.save_m2m()
+                record_audit(request.user, AuditLog.Action.CREATE, task)
+                if task.assignee_id:
+                    notify_task_assignment(task)
+        except ValidationError as error:
+            return _form_validation_error(error)
+        response = JsonResponse(_task_json(task), status=201)
+        response["Location"] = reverse(
+            "api-project-task-detail",
+            args=[project.pk, task.pk],
+        )
+        return response
+
     tasks = _project_tasks(project)
     filter_form = TaskFilterForm(request.GET, project=project)
     filter_form.fields["status"].choices = (
@@ -221,8 +373,51 @@ def api_project_task_list(request, project_id):
 
 
 @_api_login_required
-@_api_methods("GET")
+@_api_methods("GET", "PATCH", "DELETE")
 def api_project_task_detail(request, project_id, task_id):
     project = _visible_project_or_404(request.user, project_id)
     task = get_object_or_404(_project_tasks(project), pk=task_id)
+    if request.method == "GET":
+        return JsonResponse(_task_json(task))
+    if request.method == "DELETE":
+        if not can_manage_project(request.user, project):
+            return JsonResponse(
+                {"error": "Only project managers can delete tasks."},
+                status=403,
+            )
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, task)
+            task.delete()
+        return HttpResponse(status=204)
+
+    if not can_edit_task(request.user, task):
+        return JsonResponse({"error": "You cannot edit this task."}, status=403)
+    payload, error = _read_json_object(request)
+    if error:
+        return error
+    data, error = _task_form_data(payload, project, task=task)
+    if error:
+        return error
+    previous_assignee_id = task.assignee_id
+    previous_status = workflow_status_key(task)
+    form = TaskForm(data=data, instance=task, project=project)
+    if not form.is_valid():
+        return _task_form_error(form)
+    try:
+        with transaction.atomic():
+            changes = changes_from_form(form)
+            task = form.save()
+            if changes:
+                record_audit(
+                    request.user,
+                    AuditLog.Action.UPDATE,
+                    task,
+                    changes=changes,
+                )
+            if task.assignee_id and task.assignee_id != previous_assignee_id:
+                notify_task_assignment(task)
+            if workflow_status_key(task) != previous_status:
+                notify_task_status_change(task, request.user)
+    except ValidationError as error:
+        return _form_validation_error(error)
     return JsonResponse(_task_json(task))
