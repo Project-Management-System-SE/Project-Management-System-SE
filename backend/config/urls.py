@@ -5,12 +5,29 @@ from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 
 from accounts import views as account_views
+from tasks import api as task_api
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/login/", account_views.LoginView.as_view(), name="login"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", account_views.register, name="register"),
+    path("api/v1/projects/", task_api.api_project_list, name="api-project-list"),
+    path(
+        "api/v1/projects/<int:project_id>/",
+        task_api.api_project_detail,
+        name="api-project-detail",
+    ),
+    path(
+        "api/v1/projects/<int:project_id>/tasks/",
+        task_api.api_project_task_list,
+        name="api-project-task-list",
+    ),
+    path(
+        "api/v1/projects/<int:project_id>/tasks/<int:task_id>/",
+        task_api.api_project_task_detail,
+        name="api-project-task-detail",
+    ),
     path(
         "accounts/confirm/<uidb64>/<token>/",
         account_views.confirm_email,
