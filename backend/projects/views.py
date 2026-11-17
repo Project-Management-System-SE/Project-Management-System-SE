@@ -30,6 +30,7 @@ from .permissions import (
     manageable_project_ids_for,
     visible_projects_for,
 )
+from .reports import build_sprint_burndown, get_sprint_velocity_metrics
 
 
 def _manageable_project_or_403(user, project_id):
@@ -119,6 +120,66 @@ def dashboard(request):
             else 0
         )
 
+    visible_project_ids = [project.pk for project in projects]
+    sprints_by_project = {project_id: [] for project_id in visible_project_ids}
+    for sprint in Sprint.objects.filter(
+        project_id__in=visible_project_ids
+    ).order_by("project_id", "-start_date", "-created_at"):
+        sprints_by_project[sprint.project_id].append(sprint)
+
+    sprint_analytics = []
+    for project in projects:
+        project_sprints = sprints_by_project[project.pk]
+        selected_sprint = next(
+            (
+                sprint
+                for sprint in project_sprints
+                if sprint.status == Sprint.Status.ACTIVE
+            ),
+            project_sprints[0] if project_sprints else None,
+        )
+        requested_sprint_id = request.GET.get(f"sprint_{project.pk}")
+        if requested_sprint_id:
+            try:
+                requested_sprint_id = int(requested_sprint_id)
+            except (TypeError, ValueError):
+                requested_sprint_id = None
+            selected_sprint = next(
+                (
+                    sprint
+                    for sprint in project_sprints
+                    if sprint.pk == requested_sprint_id
+                ),
+                selected_sprint,
+            )
+
+        velocity = get_sprint_velocity_metrics(project)
+        velocity_by_sprint = {
+            entry["sprint"].pk: entry for entry in velocity["sprints"]
+        }
+        sprint_analytics.append(
+            {
+                "project": project,
+                "sprints": project_sprints,
+                "selected_sprint": selected_sprint,
+                "burndown": (
+                    build_sprint_burndown(selected_sprint)
+                    if selected_sprint
+                    else None
+                ),
+                "selected_velocity": (
+                    velocity_by_sprint.get(selected_sprint.pk)
+                    if selected_sprint
+                    else None
+                ),
+                "completed_sprints": [
+                    entry
+                    for entry in velocity["sprints"]
+                    if entry["is_closed"]
+                ],
+            }
+        )
+
     visible_tasks = Task.objects.filter(project__in=visible_projects)
     assignee_distribution = list(
         visible_tasks.filter(assignee__isnull=False)
@@ -146,6 +207,7 @@ def dashboard(request):
         "my_tasks": visible_tasks.filter(assignee=request.user).count(),
         "completed_tasks": visible_tasks.filter(status=Task.Status.DONE).count(),
         "projects": projects,
+        "sprint_analytics": sprint_analytics,
         "task_status_choices": Task.Status.choices,
         "assignee_distribution": assignee_distribution,
         "unassigned_task_count": unassigned_task_count,
