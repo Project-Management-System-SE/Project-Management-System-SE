@@ -111,6 +111,43 @@
                     {{ project.active_sprint.estimated_effort|floatformat:2 }} estimated /
                     {{ project.active_sprint.actual_effort|floatformat:2 }} actual hours)
                 </p>
+                <section class="dashboard-chart" aria-labelledby="burndown-heading-{{ project.pk }}">
+                    <h4 id="burndown-heading-{{ project.pk }}">Burndown · {{ project.active_sprint.name }}</h4>
+                    {% if project.burndown_chart.has_estimates %}
+                    <svg class="burndown-chart" viewBox="0 0 300 120" role="img"
+                        aria-label="Estimated remaining effort from {{ project.burndown_chart.start_label }} through {{ project.burndown_chart.current_label }}; sprint ends {{ project.burndown_chart.end_label }}">
+                        <line x1="10" y1="10" x2="10" y2="100" class="chart-axis"></line>
+                        <line x1="10" y1="100" x2="290" y2="100" class="chart-axis"></line>
+                        <polyline points="{{ project.burndown_chart.ideal_points }}" class="burndown-ideal"></polyline>
+                        <polyline points="{{ project.burndown_chart.actual_points }}" class="burndown-actual"></polyline>
+                    </svg>
+                    <p class="chart-caption">
+                        {{ project.burndown_chart.current_remaining_effort|floatformat:2 }} estimated hours remain.
+                    </p>
+                    <ul class="chart-legend">
+                        <li><span class="chart-legend-swatch chart-legend-ideal"></span>Ideal</li>
+                        <li><span class="chart-legend-swatch chart-legend-actual"></span>Actual</li>
+                    </ul>
+                    {% else %}
+                    <p class="chart-caption">Add task estimates to see sprint burndown.</p>
+                    {% endif %}
+                </section>
+                {% endif %}
+                {% if project.velocity_sprints %}
+                <section class="dashboard-chart" aria-labelledby="velocity-heading-{{ project.pk }}">
+                    <h4 id="velocity-heading-{{ project.pk }}">Completed sprint velocity</h4>
+                    <ul class="velocity-chart">
+                        {% for sprint in project.velocity_sprints %}
+                        <li>
+                            <span>{{ sprint.name }}</span>
+                            <progress max="{{ project.velocity_chart_max }}" value="{{ sprint.velocity_effort }}">
+                                {{ sprint.velocity_effort }} estimated hours
+                            </progress>
+                            <strong>{{ sprint.velocity_effort|floatformat:2 }}h</strong>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
                 {% endif %}
                 <ul class="status-breakdown" aria-label="Task status breakdown">
                     {% for status in project.status_breakdown %}

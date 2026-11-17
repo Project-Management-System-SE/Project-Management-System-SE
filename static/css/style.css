@@ -848,6 +848,105 @@ textarea::placeholder {
     font-size: 0.9375rem;
 }
 
+.dashboard-chart {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.dashboard-chart h4 {
+    margin: 0 0 0.5rem;
+    font-size: 0.9rem;
+}
+
+.burndown-chart {
+    display: block;
+    width: 100%;
+    max-height: 8rem;
+}
+
+.chart-axis {
+    stroke: var(--color-border);
+    stroke-width: 1.5;
+}
+
+.burndown-ideal,
+.burndown-actual {
+    fill: none;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.burndown-ideal {
+    stroke: var(--palette-sage);
+    stroke-dasharray: 5 4;
+}
+
+.burndown-actual {
+    stroke: var(--palette-forest);
+}
+
+.chart-caption {
+    margin: 0.25rem 0 0;
+    color: var(--color-muted);
+    font-size: 0.8125rem;
+}
+
+.chart-legend {
+    display: flex;
+    gap: 1rem;
+    margin: 0.375rem 0 0;
+    padding: 0;
+    color: var(--color-muted);
+    font-size: 0.75rem;
+    list-style: none;
+}
+
+.chart-legend li {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.chart-legend-swatch {
+    width: 0.9rem;
+    height: 0.15rem;
+    background: var(--palette-forest);
+}
+
+.chart-legend-ideal {
+    background: var(--palette-sage);
+    border-top: 1px dashed var(--color-surface);
+}
+
+.velocity-chart {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.velocity-chart li {
+    display: grid;
+    grid-template-columns: minmax(4rem, 0.8fr) minmax(3rem, 1fr) auto;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.velocity-chart span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.velocity-chart progress {
+    width: 100%;
+    accent-color: var(--palette-sage);
+}
+
 .project-detail-label {
     color: var(--color-text);
     font-weight: 600;

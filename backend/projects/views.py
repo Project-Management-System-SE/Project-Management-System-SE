@@ -3,13 +3,17 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models import Count, DecimalField, Prefetch, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
+from .analytics import (
+    build_sprint_burndown,
+    completed_sprint_metrics_for_projects,
+)
 from config.notifications import create_notifications
 from tasks.audit import changes_from_form, record_audit
 from tasks.models import AuditLog, Task
@@ -96,11 +100,41 @@ def dashboard(request):
                 Value(0),
                 output_field=DecimalField(max_digits=12, decimal_places=2),
             ),
+        ).prefetch_related(
+            Prefetch(
+                "tasks",
+                queryset=Task.objects.only(
+                    "estimated_effort",
+                    "status",
+                    "completed_at",
+                    "sprint_id",
+                ),
+            )
         )
     }
+    velocity_sprints_by_project = {
+        project.pk: [] for project in projects
+    }
+    for sprint in completed_sprint_metrics_for_projects(
+        [project.pk for project in projects]
+    ):
+        velocity_sprints_by_project[sprint.project_id].append(sprint)
 
     for project in projects:
         project.active_sprint = active_sprints.get(project.pk)
+        project.burndown_chart = (
+            build_sprint_burndown(project.active_sprint)
+            if project.active_sprint
+            else None
+        )
+        project.velocity_sprints = velocity_sprints_by_project[project.pk]
+        project.velocity_chart_max = max(
+            (
+                sprint.velocity_effort
+                for sprint in project.velocity_sprints
+            ),
+            default=1,
+        )
         project.status_breakdown = [
             {
                 "value": status_value,

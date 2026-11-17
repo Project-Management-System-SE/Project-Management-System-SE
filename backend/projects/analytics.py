@@ -15,14 +15,13 @@ EFFORT_FIELD = DecimalField(max_digits=12, decimal_places=2)
 
 def build_sprint_burndown(sprint, today=None):
     today = today or timezone.localdate()
-    tasks = sprint.tasks.values_list("estimated_effort", "status", "completed_at")
     total_effort = Decimal("0")
     completed_effort_by_date = {}
-    for estimated_effort, status, completed_at in tasks:
-        effort = estimated_effort or Decimal("0")
+    for task in sprint.tasks.all():
+        effort = task.estimated_effort or Decimal("0")
         total_effort += effort
-        if status == Task.Status.DONE and completed_at:
-            completed_date = timezone.localtime(completed_at).date()
+        if task.status == Task.Status.DONE and task.completed_at:
+            completed_date = timezone.localtime(task.completed_at).date()
             completed_effort_by_date[completed_date] = (
                 completed_effort_by_date.get(completed_date, Decimal("0")) + effort
             )
@@ -77,8 +76,8 @@ def build_sprint_burndown(sprint, today=None):
     }
 
 
-def completed_sprint_metrics(project):
-    return project.sprints.filter(status=Sprint.Status.COMPLETED).annotate(
+def _annotate_sprint_metrics(sprints):
+    return sprints.annotate(
         completed_task_count=Count(
             "tasks",
             filter=Q(tasks__status=Task.Status.DONE),
@@ -99,4 +98,19 @@ def completed_sprint_metrics(project):
             Value(Decimal("0")),
             output_field=EFFORT_FIELD,
         ),
+    )
+
+
+def completed_sprint_metrics(project):
+    return _annotate_sprint_metrics(
+        project.sprints.filter(status=Sprint.Status.COMPLETED)
     ).order_by("end_date", "pk")
+
+
+def completed_sprint_metrics_for_projects(project_ids):
+    return _annotate_sprint_metrics(
+        Sprint.objects.filter(
+            project_id__in=project_ids,
+            status=Sprint.Status.COMPLETED,
+        )
+    ).order_by("project_id", "end_date", "pk")

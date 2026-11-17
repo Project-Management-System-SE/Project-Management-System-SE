@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -7,7 +7,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import User
-from projects.models import Project, ProjectMembership
+from projects.models import Project, ProjectMembership, Sprint
 from tasks.models import Task
 
 
@@ -238,6 +238,55 @@ class DashboardViewTests(TestCase):
             updated.context["assignee_distribution"][0]["task_count"],
             1,
         )
+
+    def test_dashboard_renders_burndown_and_completed_sprint_velocity(self):
+        today = date.today()
+        active_sprint = Sprint.objects.create(
+            project=Project.objects.create(name="Charts project", owner=self.owner),
+            name="Active charts",
+            start_date=today - timedelta(days=3),
+            end_date=today + timedelta(days=7),
+            status=Sprint.Status.ACTIVE,
+        )
+        completed_sprint = Sprint.objects.create(
+            project=active_sprint.project,
+            name="Finished charts",
+            start_date=today - timedelta(days=20),
+            end_date=today - timedelta(days=10),
+            status=Sprint.Status.COMPLETED,
+        )
+        Task.objects.create(
+            project=active_sprint.project,
+            sprint=active_sprint,
+            title="Active estimate",
+            created_by=self.owner,
+            estimated_effort=Decimal("3.00"),
+        )
+        Task.objects.create(
+            project=active_sprint.project,
+            sprint=completed_sprint,
+            title="Completed estimate",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+            estimated_effort=Decimal("5.00"),
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("projects:dashboard"))
+
+        project_summary = next(
+            project
+            for project in response.context["projects"]
+            if project.pk == active_sprint.project_id
+        )
+        self.assertTrue(project_summary.burndown_chart["has_estimates"])
+        self.assertEqual(
+            project_summary.velocity_sprints[0].velocity_effort,
+            Decimal("5.00"),
+        )
+        self.assertContains(response, "Burndown · Active charts")
+        self.assertContains(response, "Completed sprint velocity")
+        self.assertContains(response, "Finished charts")
 
     def test_dashboard_excludes_tasks_from_hidden_projects(self):
         visible_project = Project.objects.create(name="Visible", owner=self.owner)
