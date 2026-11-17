@@ -191,8 +191,10 @@ issue #19 owner before changing collaboration permissions.
 Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
 tasks in projects they can access. Project Admins and Project Managers can update any task
 status; an authorized project member can update a task assigned to them or created by them.
-Supported statuses are **To Do**, **In Progress**, and **Done**. Task details also support
-creation, editing, and project-scoped labels.
+The project task page displays a Kanban board with **Backlog**, **To Do**, **In Progress**,
+**Review**, and **Done** columns. Tasks can move one stage at a time; a task must pass through
+Review before it can be marked Done. Task details also support creation, editing, deletion, and
+project-scoped labels.
 
 Invalid status values are rejected without changing the saved task. Run
 `python backend/manage.py migrate` after pulling changes to apply database migrations.
@@ -208,3 +210,75 @@ task is due. Registration confirmation and password-reset messages continue to u
 Run `python backend/manage.py send_due_date_reminders` daily to create due-date reminders. Schedule
 this command with Windows Task Scheduler or a deployment scheduler; the command records sent
 reminders so repeated runs do not create duplicates.
+
+### Dashboards and reports
+
+The dashboard shows an active-sprint burndown using estimated hours and task completion dates, plus
+velocity across completed sprints. Velocity is the estimated effort of tasks completed in each sprint;
+the accompanying CSV also includes actual effort. Projects with no task estimates show an explanation
+instead of an empty chart.
+
+Project members can download **Progress summary**, **Sprint velocity**, and **Team workload** CSV
+files from a project's details page. CSV exports are scoped to projects the signed-in user can view.
+Spreadsheet-formula prefixes in user-provided text are escaped in exports.
+
+### JSON API
+
+The versioned API uses Django session authentication. Unsafe requests require the normal Django CSRF
+token; anonymous requests receive JSON `401` responses, and project data is limited to projects
+visible to the signed-in user. Task writes use the same project permissions, workflow validation,
+notifications, and audit logging as the web interface. Responses use JSON and standard HTTP status
+codes. Task lists accept the web filters (`q`, `assignee`, `priority`, `status`, `label`, and `sprint`)
+and are paginated with `page` (default `1`) and `page_size` (default `100`, maximum `100`).
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/` | List visible projects |
+| `GET` | `/api/v1/projects/{project_id}/` | Read a visible project |
+| `GET` | `/api/v1/projects/{project_id}/tasks/` | Search and filter project tasks |
+| `POST` | `/api/v1/projects/{project_id}/tasks/` | Create a task as a project member |
+| `GET` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Read a visible task |
+| `PATCH` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Update a task you may edit |
+| `DELETE` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Delete a task as a project manager |
+
+Task create/update bodies are JSON objects. Supported fields are `title`, `description`, `priority`,
+`due_date`, `estimated_effort`, `actual_effort`, `assignee`, `sprint`, `milestone`, `status`, and
+`labels` (an array of strings); user and planning relations use their numeric IDs. Task status changes
+must follow the project's workflow. For example:
+
+```json
+{
+  "title": "Review API integration",
+  "priority": "HIGH",
+  "assignee": 12,
+  "estimated_effort": "2.50",
+  "labels": ["integration", "backend"]
+}
+```
+
+The API currently uses session/CSRF authentication; it does not issue personal access tokens and does
+not include bundled Slack or GitHub connectors.
+
+### HTTPS and backups
+
+For deployments, set `DJANGO_DEBUG=false`, a strong `DJANGO_SECRET_KEY`, and `DJANGO_ALLOWED_HOSTS`.
+With debug disabled, HTTPS redirects and secure session/CSRF cookies are enabled by default; override
+them only when the deployment topology requires it. If TLS terminates at a reverse proxy, set
+`DJANGO_TRUST_X_FORWARDED_PROTO=true` only when that proxy removes any client-supplied
+`X-Forwarded-Proto` header and writes its own. Enable HSTS with `DJANGO_SECURE_HSTS_SECONDS` only
+after confirming HTTPS is permanent for the deployment domain.
+
+Create a compressed database and uploaded-media backup with:
+
+```powershell
+python backend\manage.py backup_database
+```
+
+By default, archives are written to `backend\backups`; set `DJANGO_BACKUP_DIR` or pass `--output-dir`
+to select protected storage outside the web root and repository. Schedule this command daily using
+Windows Task Scheduler or the deployment scheduler, and periodically test restore procedures. Each
+archive contains a Django `database.json` fixture, a manifest, and files from `DJANGO_MEDIA_ROOT`.
+To restore, load the fixture with `python backend\manage.py loaddata <database.json>` and restore the
+archive's `media` files to `DJANGO_MEDIA_ROOT`. On a fresh database, apply migrations before loading
+the fixture. Backups contain personal data and password hashes; restrict access and encrypt them at
+rest.

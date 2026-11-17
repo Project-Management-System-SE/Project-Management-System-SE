@@ -6,6 +6,37 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def ensure_task_comment_schema(apps, schema_editor):
+    task_comment = apps.get_model("tasks", "TaskComment")
+    table_name = task_comment._meta.db_table
+    connection = schema_editor.connection
+    if table_name not in connection.introspection.table_names():
+        schema_editor.create_model(task_comment)
+        return
+
+    with connection.cursor() as cursor:
+        columns = {
+            column.name
+            for column in connection.introspection.get_table_description(
+                cursor,
+                table_name,
+            )
+        }
+
+    if "content" in columns:
+        return
+    if "body" not in columns:
+        raise RuntimeError(
+            f"Cannot migrate {table_name}: expected a body or content column."
+        )
+
+    quote_name = connection.ops.quote_name
+    schema_editor.execute(
+        f"ALTER TABLE {quote_name(table_name)} "
+        f"RENAME COLUMN {quote_name('body')} TO {quote_name('content')}"
+    )
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -28,17 +59,25 @@ class Migration(migrations.Migration):
                 'ordering': ['created_at', 'pk'],
             },
         ),
-        migrations.CreateModel(
-            name='TaskComment',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('content', models.TextField()),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('author', models.ForeignKey(on_delete=django.db.models.deletion.RESTRICT, related_name='task_comments', to=settings.AUTH_USER_MODEL)),
-                ('task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='comments', to='tasks.task')),
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.CreateModel(
+                    name='TaskComment',
+                    fields=[
+                        ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                        ('content', models.TextField()),
+                        ('created_at', models.DateTimeField(auto_now_add=True)),
+                        ('author', models.ForeignKey(on_delete=django.db.models.deletion.RESTRICT, related_name='task_comments', to=settings.AUTH_USER_MODEL)),
+                        ('task', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='comments', to='tasks.task')),
+                    ],
+                    options={
+                        'ordering': ['created_at', 'pk'],
+                    },
+                ),
             ],
-            options={
-                'ordering': ['created_at', 'pk'],
-            },
+        ),
+        migrations.RunPython(
+            ensure_task_comment_schema,
+            migrations.RunPython.noop,
         ),
     ]

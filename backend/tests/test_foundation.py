@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from django.conf import settings
-from django.test import SimpleTestCase
+from django.test import Client, SimpleTestCase, override_settings
 from django.urls import resolve, reverse
 
 from projects import views
@@ -24,6 +24,22 @@ class SettingsTests(SimpleTestCase):
 
     def test_development_secret_key_is_not_empty(self):
         self.assertTrue(settings.SECRET_KEY)
+
+    @override_settings(SECURE_SSL_REDIRECT=True)
+    def test_http_requests_redirect_to_https(self):
+        response = Client().get(reverse("login"))
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(
+            response["Location"],
+            f"https://testserver{reverse('login')}",
+        )
+
+    @override_settings(CSRF_COOKIE_SECURE=True)
+    def test_csrf_cookie_is_marked_secure_when_configured(self):
+        response = Client().get(reverse("login"), secure=True)
+
+        self.assertTrue(response.cookies[settings.CSRF_COOKIE_NAME]["secure"])
 
 
 class UrlTests(SimpleTestCase):

@@ -242,6 +242,21 @@ class ProjectManagementTests(TestCase):
             ).exists()
         )
 
+    def test_project_members_can_open_report_downloads(self):
+        self.client.force_login(self.member)
+
+        response = self.client.get(
+            reverse("projects:project-detail", args=[self.project.pk])
+        )
+
+        self.assertContains(response, "Progress summary (CSV)")
+        self.assertContains(response, "Sprint velocity (CSV)")
+        self.assertContains(response, "Team workload (CSV)")
+        self.assertContains(
+            response,
+            reverse("projects:project-progress-report", args=[self.project.pk]),
+        )
+
     def test_project_manager_can_add_team_member(self):
         self.client.force_login(self.manager)
 
