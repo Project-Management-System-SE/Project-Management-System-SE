@@ -122,6 +122,9 @@ def _task_detail_context(
             )
         ),
         "comments": task.comments.select_related("author").order_by("created_at", "pk"),
+        "activity": task.audit_log_entries.select_related("actor").order_by(
+            "timestamp", "pk"
+        ),
         "attachments": task.attachments.select_related("uploaded_by").order_by(
             "created_at", "pk"
         ),

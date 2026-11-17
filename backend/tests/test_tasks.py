@@ -957,6 +957,23 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(list_response, "4.25h")
         self.assertContains(list_response, "5.50h")
 
+    def test_task_delete_action_is_only_shown_to_project_managers(self):
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.client.force_login(self.member)
+
+        member_response = self.client.get(detail_url)
+
+        self.assertContains(member_response, "Edit task")
+        self.assertNotContains(member_response, "Delete task")
+
+        self.client.force_login(self.owner)
+        manager_response = self.client.get(detail_url)
+
+        self.assertEqual(manager_response.content.count(b">Delete task</a>"), 1)
+
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
