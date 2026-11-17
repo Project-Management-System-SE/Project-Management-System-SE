@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}REST API Documentation - Project Flow{% endblock %}
+
+{% block content %}
+<div class="content-header">
+    <div>
+        <h1 class="page-title">REST API &amp; Integrations Reference</h1>
+        <p class="text-secondary">Comprehensive documentation for external tools (GitHub Actions, Slack, Email) and client integrations.</p>
+    </div>
+    <div>
+        <a href="{% url 'api:openapi-spec' %}" class="btn btn-secondary" target="_blank">Download OpenAPI JSON</a>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">
+        <h2 style="font-size: 1.15rem; font-weight: 600;">Authentication</h2>
+    </div>
+    <div class="card-body">
+        <p>Pass your authentication token via HTTP Authorization header:</p>
+        <pre style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 6px; overflow-x: auto;"><code>Authorization: Bearer &lt;your_api_token&gt;</code></pre>
+        <p style="margin-top: 0.5rem;" class="text-muted">Standard browser session authentication is also supported automatically.</p>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">
+        <h2 style="font-size: 1.15rem; font-weight: 600;">Endpoints Overview</h2>
+    </div>
+    <div class="card-body">
+        <ul style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.75rem;">
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <code style="font-size: 1rem;">/api/v1/projects/</code>
+                <span class="text-muted" style="margin-left: auto;">List accessible projects</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{id}/tasks/</code>
+                <span class="text-muted" style="margin-left: auto;">List tasks with filters</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{id}/tasks/</code>
+                <span class="text-muted" style="margin-left: auto;">Create new task (validated)</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/tasks/{id}/status/</code>
+                <span class="text-muted" style="margin-left: auto;">Update status (workflow enforced)</span>
+            </li>
+        </ul>
+    </div>
+</div>
+{% endblock %}

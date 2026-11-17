@@ -148,3 +148,56 @@ class MilestoneForm(forms.ModelForm):
         if commit:
             milestone.save()
         return milestone
+
+
+class ProjectWorkflowConfigForm(forms.Form):
+    allow_todo_to_in_progress = forms.BooleanField(required=False, initial=True, label="To Do -> In Progress")
+    allow_in_progress_to_in_review = forms.BooleanField(required=False, initial=True, label="In Progress -> In Review")
+    allow_in_progress_to_todo = forms.BooleanField(required=False, initial=True, label="In Progress -> To Do (reopen/block)")
+    allow_in_review_to_done = forms.BooleanField(required=False, initial=True, label="In Review -> Done")
+    allow_in_review_to_in_progress = forms.BooleanField(required=False, initial=True, label="In Review -> In Progress (request changes)")
+    allow_done_to_in_progress = forms.BooleanField(required=False, initial=True, label="Done -> In Progress (reopen)")
+    allow_direct_todo_to_done = forms.BooleanField(required=False, initial=False, label="Direct To Do -> Done (skip review)")
+
+    def save(self, project):
+        from .models import ProjectWorkflowTransition
+        rules = [
+            ("TODO", "IN_PROGRESS", self.cleaned_data["allow_todo_to_in_progress"]),
+            ("IN_PROGRESS", "IN_REVIEW", self.cleaned_data["allow_in_progress_to_in_review"]),
+            ("IN_PROGRESS", "TODO", self.cleaned_data["allow_in_progress_to_todo"]),
+            ("IN_REVIEW", "DONE", self.cleaned_data["allow_in_review_to_done"]),
+            ("IN_REVIEW", "IN_PROGRESS", self.cleaned_data["allow_in_review_to_in_progress"]),
+            ("DONE", "IN_PROGRESS", self.cleaned_data["allow_done_to_in_progress"]),
+            ("TODO", "DONE", self.cleaned_data["allow_direct_todo_to_done"]),
+        ]
+        for from_s, to_s, allowed in rules:
+            ProjectWorkflowTransition.objects.update_or_create(
+                project=project,
+                from_status=from_s,
+                to_status=to_s,
+                defaults={"is_allowed": allowed},
+            )
+
+
+class ProjectReportFilterForm(forms.Form):
+    start_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        label="Start date",
+    )
+    end_date = forms.DateField(
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+        label="End date",
+    )
+    sprint = forms.ModelChoiceField(
+        queryset=Sprint.objects.none(),
+        required=False,
+        empty_label="All sprints",
+        label="Sprint",
+    )
+
+    def __init__(self, *args, project=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if project:
+            self.fields["sprint"].queryset = project.sprints.all()

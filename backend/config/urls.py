@@ -14,19 +14,23 @@ urlpatterns = [
     path("accounts/login/", account_views.LoginView.as_view(), name="login"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", account_views.register, name="register"),
-    path("api/v1/projects/", task_api.api_project_list, name="api-project-list"),
     path(
-        "api/v1/projects/<int:project_id>/",
+        "api/v1/session/projects/",
+        task_api.api_project_list,
+        name="api-project-list",
+    ),
+    path(
+        "api/v1/session/projects/<int:project_id>/",
         task_api.api_project_detail,
         name="api-project-detail",
     ),
     path(
-        "api/v1/projects/<int:project_id>/tasks/",
+        "api/v1/session/projects/<int:project_id>/tasks/",
         task_api.api_project_task_list,
         name="api-project-task-list",
     ),
     path(
-        "api/v1/projects/<int:project_id>/tasks/<int:task_id>/",
+        "api/v1/session/projects/<int:project_id>/tasks/<int:task_id>/",
         task_api.api_project_task_detail,
         name="api-project-task-detail",
     ),
@@ -57,6 +61,7 @@ urlpatterns = [
     ),
     path("", include("projects.urls")),
     path("", include("tasks.urls")),
+    path("api/v1/", include("api.urls")),
 ]
 
 if settings.DEBUG:

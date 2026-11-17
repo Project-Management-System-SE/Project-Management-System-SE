@@ -252,3 +252,23 @@ class SprintTaskHistory(models.Model):
 
     def __str__(self):
         return f"{self.task} in {self.sprint}"
+
+
+class ProjectWorkflowTransition(models.Model):
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="workflow_transitions",
+    )
+    from_status = models.CharField(max_length=20)
+    to_status = models.CharField(max_length=20)
+    is_allowed = models.BooleanField(default=True)
+    description = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        unique_together = ("project", "from_status", "to_status")
+        ordering = ["from_status", "to_status"]
+
+    def __str__(self):
+        status_text = "allowed" if self.is_allowed else "blocked"
+        return f"{self.project.name}: {self.from_status} -> {self.to_status} ({status_text})"

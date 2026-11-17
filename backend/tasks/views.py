@@ -38,9 +38,16 @@ from .notifications import (
     notify_task_comment,
     notify_task_status_change,
 )
-from .permissions import can_create_task_in, can_edit_task, can_view_tasks_for
+from .permissions import (
+    can_create_task_in,
+    can_delete_task,
+    can_edit_task,
+    can_reassign_task,
+    can_view_tasks_for,
+)
 from .workflow import (
     allowed_status_transitions,
+    is_valid_workflow_transition,
     set_task_workflow_status,
     task_status_for_workflow_state,
     workflow_choices_for,
@@ -94,6 +101,7 @@ def _get_visible_task(user, project_id, task_id):
         project_id=project_id,
     )
     if not can_view_tasks_for(user, task.project):
+        logger.warning(f"User {user.pk} attempted unauthorized view of task {task_id}")
         raise Http404
     return task
 
@@ -129,6 +137,10 @@ def _task_detail_context(
             "created_at", "pk"
         ),
         "comment_form": comment_form if comment_form is not None else TaskCommentForm(),
+        "allowed_transitions": allowed_status_transitions(
+            workflow_status_key(task),
+            task.project,
+        ),
         "attachment_form": (
             attachment_form
             if attachment_form is not None
@@ -443,26 +455,36 @@ def task_update(request, project_id, task_id):
     if request.method == "POST":
         form = TaskForm(request.POST, instance=task, project=project)
         if form.is_valid():
-            with transaction.atomic():
-                changes = changes_from_form(form)
-                task = form.save()
-                if changes:
-                    record_audit(
-                        request.user,
-                        AuditLog.Action.UPDATE,
-                        task,
-                        changes=changes,
-                    )
-                if task.assignee_id and task.assignee_id != previous_assignee_id:
-                    notify_task_assignment(task)
-                if workflow_status_key(task) != previous_status:
-                    notify_task_status_change(task, request.user)
-            messages.success(request, f"Task '{task.title}' updated successfully.")
-            return redirect(
-                "tasks:task-detail",
-                project_id=project.pk,
-                task_id=task.pk,
-            )
+            new_assignee = form.cleaned_data["assignee"]
+            if (
+                (new_assignee.pk if new_assignee else None) != previous_assignee_id
+                and not can_reassign_task(request.user, task)
+            ):
+                form.add_error(
+                    "assignee",
+                    "Only project managers can reassign tasks.",
+                )
+            else:
+                with transaction.atomic():
+                    changes = changes_from_form(form)
+                    task = form.save()
+                    if changes:
+                        record_audit(
+                            request.user,
+                            AuditLog.Action.UPDATE,
+                            task,
+                            changes=changes,
+                        )
+                    if task.assignee_id and task.assignee_id != previous_assignee_id:
+                        notify_task_assignment(task)
+                    if workflow_status_key(task) != previous_status:
+                        notify_task_status_change(task, request.user)
+                messages.success(request, f"Task '{task.title}' updated successfully.")
+                return redirect(
+                    "tasks:task-detail",
+                    project_id=project.pk,
+                    task_id=task.pk,
+                )
     else:
         form = TaskForm(instance=task, project=project)
 
@@ -522,46 +544,53 @@ def task_update_status(request, project_id, task_id):
     )
     if status_form.is_valid():
         previous_status = workflow_status_key(task)
-        with transaction.atomic():
-            set_task_workflow_status(
-                task,
-                status_form.cleaned_data["status"],
-                project,
-            )
-            task.save()
-            current_status = workflow_status_key(task)
-            if current_status != previous_status:
-                record_audit(
-                    request.user,
-                    AuditLog.Action.UPDATE,
-                    task,
-                    changes={
-                        "status": {
-                            "from": previous_status,
-                            "to": current_status,
-                        }
-                    },
+        new_status = status_form.cleaned_data["status"]
+        if is_valid_workflow_transition(
+            previous_status,
+            new_status,
+            project,
+            user=request.user,
+        ):
+            with transaction.atomic():
+                set_task_workflow_status(task, new_status, project)
+                task.save()
+                current_status = workflow_status_key(task)
+                if current_status != previous_status:
+                    record_audit(
+                        request.user,
+                        AuditLog.Action.UPDATE,
+                        task,
+                        changes={
+                            "status": {
+                                "from": previous_status,
+                                "to": current_status,
+                            }
+                        },
+                    )
+                    notify_task_status_change(task, request.user)
+            if expects_json:
+                status_display = (
+                    task.workflow_state.name
+                    if task.workflow_state_id
+                    else task.get_status_display()
                 )
-                notify_task_status_change(task, request.user)
-        if expects_json:
-            status_display = (
-                task.workflow_state.name
-                if task.workflow_state_id
-                else task.get_status_display()
+                return JsonResponse(
+                    {
+                        "success": True,
+                        "status": workflow_status_key(task),
+                        "status_display": status_display,
+                        "message": "Task status updated.",
+                    }
+                )
+            messages.success(request, "Task status updated.")
+            return redirect(
+                "tasks:task-detail",
+                project_id=project.pk,
+                task_id=task.pk,
             )
-            return JsonResponse(
-                {
-                    "success": True,
-                    "status": workflow_status_key(task),
-                    "status_display": status_display,
-                    "message": "Task status updated.",
-                }
-            )
-        messages.success(request, "Task status updated.")
-        return redirect(
-            "tasks:task-detail",
-            project_id=project.pk,
-            task_id=task.pk,
+        status_form.add_error(
+            "status",
+            "This status change is not allowed by the project workflow.",
         )
 
     if expects_json:
@@ -658,43 +687,11 @@ def workflow_configure(request, project_id):
 
 
 @login_required
-def task_comment_create(request, project_id, task_id):
-    task = _get_visible_task(request.user, project_id, task_id)
-    if request.method != "POST":
-        return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
-
-    form = TaskCommentForm(request.POST)
-    if form.is_valid():
-        comment = form.save(commit=False)
-        comment.task = task
-        comment.author = request.user
-        try:
-            with transaction.atomic():
-                comment.save()
-                notify_task_comment(task, comment)
-        except DatabaseError:
-            logger.exception("Could not save comment for task %s", task.pk)
-            form.add_error(None, "Could not save your comment. Please try again.")
-        else:
-            messages.success(request, "Comment added.")
-            return redirect("tasks:task-detail", project_id=project_id, task_id=task_id)
-
-    return render(
-        request,
-        "task_detail.html",
-        _task_detail_context(request, task, comment_form=form),
-    )
-
-
-task_add_comment = task_comment_create
-
-
-@login_required
 @require_http_methods(["GET", "POST"])
 def task_delete(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(project.tasks, pk=task_id)
-    if not can_manage_project(request.user, project):
+    if not can_delete_task(request.user, task):
         raise PermissionDenied("You do not have permission to delete this task.")
 
     if request.method == "POST":

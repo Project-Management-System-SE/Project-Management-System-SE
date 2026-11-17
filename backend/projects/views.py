@@ -3,17 +3,13 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, DecimalField, Prefetch, Q, Sum, Value
+from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .analytics import (
-    build_sprint_burndown,
-    completed_sprint_metrics_for_projects,
-)
 from config.notifications import create_notifications
 from tasks.audit import changes_from_form, record_audit
 from tasks.models import AuditLog, Task
@@ -34,6 +30,7 @@ from .permissions import (
     manageable_project_ids_for,
     visible_projects_for,
 )
+from .reports import build_sprint_burndown, get_sprint_velocity_metrics
 
 
 def _manageable_project_or_403(user, project_id):
@@ -100,41 +97,11 @@ def dashboard(request):
                 Value(0),
                 output_field=DecimalField(max_digits=12, decimal_places=2),
             ),
-        ).prefetch_related(
-            Prefetch(
-                "tasks",
-                queryset=Task.objects.only(
-                    "estimated_effort",
-                    "status",
-                    "completed_at",
-                    "sprint_id",
-                ),
-            )
         )
     }
-    velocity_sprints_by_project = {
-        project.pk: [] for project in projects
-    }
-    for sprint in completed_sprint_metrics_for_projects(
-        [project.pk for project in projects]
-    ):
-        velocity_sprints_by_project[sprint.project_id].append(sprint)
 
     for project in projects:
         project.active_sprint = active_sprints.get(project.pk)
-        project.burndown_chart = (
-            build_sprint_burndown(project.active_sprint)
-            if project.active_sprint
-            else None
-        )
-        project.velocity_sprints = velocity_sprints_by_project[project.pk]
-        project.velocity_chart_max = max(
-            (
-                sprint.velocity_effort
-                for sprint in project.velocity_sprints
-            ),
-            default=1,
-        )
         project.status_breakdown = [
             {
                 "value": status_value,
@@ -151,6 +118,66 @@ def dashboard(request):
             round(project.completed_task_count * 100 / project.total_task_count)
             if project.total_task_count
             else 0
+        )
+
+    visible_project_ids = [project.pk for project in projects]
+    sprints_by_project = {project_id: [] for project_id in visible_project_ids}
+    for sprint in Sprint.objects.filter(
+        project_id__in=visible_project_ids
+    ).order_by("project_id", "-start_date", "-created_at"):
+        sprints_by_project[sprint.project_id].append(sprint)
+
+    sprint_analytics = []
+    for project in projects:
+        project_sprints = sprints_by_project[project.pk]
+        selected_sprint = next(
+            (
+                sprint
+                for sprint in project_sprints
+                if sprint.status == Sprint.Status.ACTIVE
+            ),
+            project_sprints[0] if project_sprints else None,
+        )
+        requested_sprint_id = request.GET.get(f"sprint_{project.pk}")
+        if requested_sprint_id:
+            try:
+                requested_sprint_id = int(requested_sprint_id)
+            except (TypeError, ValueError):
+                requested_sprint_id = None
+            selected_sprint = next(
+                (
+                    sprint
+                    for sprint in project_sprints
+                    if sprint.pk == requested_sprint_id
+                ),
+                selected_sprint,
+            )
+
+        velocity = get_sprint_velocity_metrics(project)
+        velocity_by_sprint = {
+            entry["sprint"].pk: entry for entry in velocity["sprints"]
+        }
+        sprint_analytics.append(
+            {
+                "project": project,
+                "sprints": project_sprints,
+                "selected_sprint": selected_sprint,
+                "burndown": (
+                    build_sprint_burndown(selected_sprint)
+                    if selected_sprint
+                    else None
+                ),
+                "selected_velocity": (
+                    velocity_by_sprint.get(selected_sprint.pk)
+                    if selected_sprint
+                    else None
+                ),
+                "completed_sprints": [
+                    entry
+                    for entry in velocity["sprints"]
+                    if entry["is_closed"]
+                ],
+            }
         )
 
     visible_tasks = Task.objects.filter(project__in=visible_projects)
@@ -180,6 +207,7 @@ def dashboard(request):
         "my_tasks": visible_tasks.filter(assignee=request.user).count(),
         "completed_tasks": visible_tasks.filter(status=Task.Status.DONE).count(),
         "projects": projects,
+        "sprint_analytics": sprint_analytics,
         "task_status_choices": Task.Status.choices,
         "assignee_distribution": assignee_distribution,
         "unassigned_task_count": unassigned_task_count,
@@ -734,3 +762,120 @@ def project_delete(request, project_id):
         return redirect("projects:project-list")
 
     return render(request, "project_confirm_delete.html", {"project": project})
+
+
+@login_required
+def project_workflow_settings(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    if not can_manage_project(request.user, project):
+        raise PermissionDenied("Only project managers can configure workflow transitions.")
+
+    from .forms import ProjectWorkflowConfigForm
+    from .models import ProjectWorkflowTransition
+
+    transitions = {
+        (t.from_status, t.to_status): t.is_allowed
+        for t in project.workflow_transitions.all()
+    }
+
+    initial_data = {
+        "allow_todo_to_in_progress": transitions.get(("TODO", "IN_PROGRESS"), True),
+        "allow_in_progress_to_in_review": transitions.get(("IN_PROGRESS", "IN_REVIEW"), True),
+        "allow_in_progress_to_todo": transitions.get(("IN_PROGRESS", "TODO"), True),
+        "allow_in_review_to_done": transitions.get(("IN_REVIEW", "DONE"), True),
+        "allow_in_review_to_in_progress": transitions.get(("IN_REVIEW", "IN_PROGRESS"), True),
+        "allow_done_to_in_progress": transitions.get(("DONE", "IN_PROGRESS"), True),
+        "allow_direct_todo_to_done": transitions.get(("TODO", "DONE"), False),
+    }
+
+    if request.method == "POST":
+        form = ProjectWorkflowConfigForm(request.POST)
+        if form.is_valid():
+            form.save(project)
+            messages.success(request, "Project workflow transitions updated successfully.")
+            return redirect("projects:project-workflow-settings", project_id=project.pk)
+    else:
+        form = ProjectWorkflowConfigForm(initial=initial_data)
+
+    return render(
+        request,
+        "project_workflow_settings.html",
+        {"project": project, "form": form, "can_manage_project": True},
+    )
+
+
+@login_required
+def project_reports(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    from .forms import ProjectReportFilterForm
+    from .reports import (
+        get_project_progress_metrics,
+        get_sprint_velocity_metrics,
+        get_team_workload_metrics,
+    )
+
+    filter_form = ProjectReportFilterForm(request.GET, project=project)
+    start_date = None
+    end_date = None
+    selected_sprint = None
+    if filter_form.is_valid():
+        start_date = filter_form.cleaned_data.get("start_date")
+        end_date = filter_form.cleaned_data.get("end_date")
+        selected_sprint = filter_form.cleaned_data.get("sprint")
+
+    progress = get_project_progress_metrics(
+        project,
+        start_date=start_date,
+        end_date=end_date,
+        sprint=selected_sprint,
+    )
+    velocity = get_sprint_velocity_metrics(project)
+    workload = get_team_workload_metrics(project)
+
+    return render(
+        request,
+        "project_reports.html",
+        {
+            "project": project,
+            "filter_form": filter_form,
+            "progress": progress,
+            "velocity": velocity,
+            "workload": workload,
+            "selected_sprint": selected_sprint,
+            "can_manage_project": can_manage_project(request.user, project),
+        },
+    )
+
+
+@login_required
+def project_report_download(request, project_id):
+    from django.http import HttpResponse
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    from .forms import ProjectReportFilterForm
+    from .reports import generate_summary_report_csv, generate_tasks_report_csv
+
+    report_type = request.GET.get("type", "tasks")
+    filter_form = ProjectReportFilterForm(request.GET, project=project)
+    start_date = None
+    end_date = None
+    selected_sprint = None
+    if filter_form.is_valid():
+        start_date = filter_form.cleaned_data.get("start_date")
+        end_date = filter_form.cleaned_data.get("end_date")
+        selected_sprint = filter_form.cleaned_data.get("sprint")
+
+    if report_type == "summary":
+        csv_data = generate_summary_report_csv(project)
+        filename = f"{project.name.replace(' ', '_')}_summary_report.csv"
+    else:
+        csv_data = generate_tasks_report_csv(
+            project,
+            start_date=start_date,
+            end_date=end_date,
+            sprint=selected_sprint,
+        )
+        filename = f"{project.name.replace(' ', '_')}_tasks_report.csv"
+
+    response = HttpResponse(csv_data, content_type="text/csv")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

@@ -212,35 +212,76 @@ Run `python backend/manage.py send_due_date_reminders` daily to create due-date 
 this command with Windows Task Scheduler or a deployment scheduler; the command records sent
 reminders so repeated runs do not create duplicates.
 
+---
+
+## Sprint 2 & 3 Features Implementation
+
+### 1. Task Permissions and Validation (#19)
+- Server-side permission predicates for task operations (`can_reassign_task`, `can_delete_task`, `can_edit_task`).
+- Membership-restricted task assignment validation.
+- Detailed documentation: [Task Permissions Matrix](docs/task_permissions_matrix.md).
+
+### 2. Configurable Project Workflows & Transition Enforcement (#39)
+- Custom state machine rules per project with `ProjectWorkflowTransition` model.
+- Backend enforcement engine rejecting illegal transitions.
+- Interactive workflow settings UI for Project Managers.
+- Detailed documentation: [Workflow Management](docs/workflow_management.md).
+
+### 3. Downloadable Project Reports (#45)
+- Project progress KPIs, sprint delivery velocity, and team workload allocation metrics.
+- Export formats: Detailed Tasks CSV and Executive Summary CSV.
+- Detailed documentation: [Reports Specification](docs/reports_specification.md).
+
+### 4. REST API and External Integrations (#47)
+- Authenticated REST endpoints for projects, tasks, sprints, and milestones.
+- API Token header authentication mechanism.
+- OpenAPI 3.0 interactive documentation viewer at `/api/v1/docs/`.
+- Detailed documentation: [API Documentation](docs/api_documentation.md).
+
+### 5. Production Database Configuration (#48)
+- Dynamic database dialect support (PostgreSQL, MySQL, SQLite) via environment variables.
+- Health check diagnostic command: `python backend/manage.py check_db_connection`.
+- Detailed documentation: [Database Configuration](docs/database_configuration.md).
+
+### 6. Production Security Baseline & Verification (#50)
+- Security headers, HSTS, SSL redirect, and HTTP-only cookie configuration.
+- Automated security audit command: `python backend/manage.py verify_production_security`.
+- Production environment template: `.env.example`.
+- Detailed documentation: [Production Security](docs/production_security.md).
+
 ### Dashboards and reports
 
-The dashboard shows an active-sprint burndown using estimated hours and task completion dates, plus
-velocity across completed sprints. Velocity is the estimated effort of tasks completed in each sprint;
-the accompanying CSV also includes actual effort. Projects with no task estimates show an explanation
-instead of an empty chart.
+The dashboard provides per-project sprint selection, a burndown when saved completion timestamps
+provide enough history, and a comparison of completed-sprint velocity. Burndown history is limited:
+the database does not retain daily status, estimate, or sprint-assignment snapshots, so reopened tasks
+and historical changes cannot be reconstructed. Velocity is the estimated effort of DONE tasks in a
+completed sprint; a complete figure is unavailable when any completed task lacks an estimate.
+Actual logged effort is reported separately and is not used as velocity.
 
 Project members can download **Progress summary**, **Sprint velocity**, and **Team workload** CSV
 files from a project's details page. CSV exports are scoped to projects the signed-in user can view.
 Spreadsheet-formula prefixes in user-provided text are escaped in exports.
 
-### JSON API
+### REST APIs
 
-The versioned API uses Django session authentication. Unsafe requests require the normal Django CSRF
-token; anonymous requests receive JSON `401` responses, and project data is limited to projects
-visible to the signed-in user. Task writes use the same project permissions, workflow validation,
-notifications, and audit logging as the web interface. Responses use JSON and standard HTTP status
-codes. Task lists accept the web filters (`q`, `assignee`, `priority`, `status`, `label`, and `sprint`)
-and are paginated with `page` (default `1`) and `page_size` (default `100`, maximum `100`).
+The versioned API provides a token-authenticated interface at `/api/v1/` and a session-authenticated
+interface at `/api/v1/session/`. Token-authenticated writes require a per-user API token in the
+`Authorization: Bearer <token>` or `Authorization: Token <token>` header. Session API writes require
+the normal Django CSRF token. Anonymous requests receive JSON `401` responses, and project data is
+limited to projects visible to the authenticated user. Task writes use the applicable project
+permissions and workflow validation. The session API also records notifications and audit history.
+Task lists accept the web filters (`q`, `assignee`, `priority`, `status`, `label`, and `sprint`) and
+are paginated with `page` (default `1`) and `page_size` (default `100`, maximum `100`).
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/projects/` | List visible projects |
-| `GET` | `/api/v1/projects/{project_id}/` | Read a visible project |
-| `GET` | `/api/v1/projects/{project_id}/tasks/` | Search and filter project tasks |
-| `POST` | `/api/v1/projects/{project_id}/tasks/` | Create a task as a project member |
-| `GET` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Read a visible task |
-| `PATCH` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Update a task you may edit |
-| `DELETE` | `/api/v1/projects/{project_id}/tasks/{task_id}/` | Delete a task as a project manager |
+| `GET` | `/api/v1/session/projects/` | List visible projects |
+| `GET` | `/api/v1/session/projects/{project_id}/` | Read a visible project |
+| `GET` | `/api/v1/session/projects/{project_id}/tasks/` | Search and filter project tasks |
+| `POST` | `/api/v1/session/projects/{project_id}/tasks/` | Create a task as a project member |
+| `GET` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Read a visible task |
+| `PATCH` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Update a task you may edit |
+| `DELETE` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Delete a task as a project manager |
 
 Task create/update bodies are JSON objects. Supported fields are `title`, `description`, `priority`,
 `due_date`, `estimated_effort`, `actual_effort`, `assignee`, `sprint`, `milestone`, `status`, and
@@ -257,8 +298,8 @@ must follow the project's workflow. For example:
 }
 ```
 
-The API currently uses session/CSRF authentication; it does not issue personal access tokens and does
-not include bundled Slack or GitHub connectors.
+The token API also exposes sprint, milestone, and task-status endpoints, and provides an OpenAPI 3.0
+viewer at `/api/v1/docs/`. The project does not include bundled Slack or GitHub connectors.
 
 ### HTTPS and backups
 
@@ -297,8 +338,9 @@ service's **Root Directory** to `backend` and configure:
 `backend/requirements.txt` installs Gunicorn, Psycopg, `dj-database-url`, and WhiteNoise. The
 `python -m gunicorn` invocation uses the same Python environment that installed the dependencies.
 Attach a Render PostgreSQL database and set `DATABASE_URL` to its internal connection string.
-`DATABASE_URL` is required when `DJANGO_DEBUG=false`; startup fails rather than falling back to
-SQLite if it is missing. Also configure `DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`,
+Set `DATABASE_URL` or configure `DJANGO_DB_ENGINE` as PostgreSQL or MySQL when
+`DJANGO_DEBUG=false`; startup fails rather than falling back to SQLite. Also configure
+`DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`,
 `DJANGO_ALLOWED_HOSTS`, and `DJANGO_TRUST_X_FORWARDED_PROTO=true`. Production enables HTTPS
 redirect, secure cookies, and one-year HSTS by default; only reduce `DJANGO_SECURE_HSTS_SECONDS`
 if HTTPS is not permanently available. Leave HSTS subdomain and preload options disabled unless

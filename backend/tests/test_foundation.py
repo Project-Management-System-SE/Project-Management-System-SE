@@ -126,6 +126,40 @@ class SettingsTests(SimpleTestCase):
             result.stderr,
         )
 
+    def test_production_supports_explicit_postgres_connection_settings(self):
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DJANGO_DEBUG": "false",
+                "DJANGO_SECRET_KEY": "test-deployment-secret-with-adequate-length-0123456789",
+                "DJANGO_DB_ENGINE": "postgresql",
+                "DJANGO_DB_NAME": "configured_pms",
+            }
+        )
+        environment.pop("DATABASE_URL", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "from django.conf import settings; "
+                    "print(settings.DATABASES['default']['ENGINE']); "
+                    "print(settings.DATABASES['default']['NAME'])"
+                ),
+            ],
+            cwd=settings.BASE_DIR,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["django.db.backends.postgresql", "configured_pms"],
+        )
+
 
 class HealthCheckTests(TestCase):
     def test_health_check_reports_application_and_database_status(self):
@@ -159,6 +193,10 @@ class UrlTests(SimpleTestCase):
         self.assertEqual(reverse("projects:dashboard"), "/")
         self.assertEqual(reverse("projects:project-list"), "/projects/")
         self.assertEqual(reverse("projects:project-create"), "/projects/new/")
+
+    def test_api_interfaces_have_distinct_routes(self):
+        self.assertEqual(reverse("api-project-list"), "/api/v1/session/projects/")
+        self.assertEqual(reverse("api:project-list"), "/api/v1/projects/")
 
     def test_auth_routes_reverse(self):
         self.assertEqual(reverse("login"), "/accounts/login/")

@@ -111,43 +111,6 @@
                     {{ project.active_sprint.estimated_effort|floatformat:2 }} estimated /
                     {{ project.active_sprint.actual_effort|floatformat:2 }} actual hours)
                 </p>
-                <section class="dashboard-chart" aria-labelledby="burndown-heading-{{ project.pk }}">
-                    <h4 id="burndown-heading-{{ project.pk }}">Burndown · {{ project.active_sprint.name }}</h4>
-                    {% if project.burndown_chart.has_estimates %}
-                    <svg class="burndown-chart" viewBox="0 0 300 120" role="img"
-                        aria-label="Estimated remaining effort from {{ project.burndown_chart.start_label }} through {{ project.burndown_chart.current_label }}; sprint ends {{ project.burndown_chart.end_label }}">
-                        <line x1="10" y1="10" x2="10" y2="100" class="chart-axis"></line>
-                        <line x1="10" y1="100" x2="290" y2="100" class="chart-axis"></line>
-                        <polyline points="{{ project.burndown_chart.ideal_points }}" class="burndown-ideal"></polyline>
-                        <polyline points="{{ project.burndown_chart.actual_points }}" class="burndown-actual"></polyline>
-                    </svg>
-                    <p class="chart-caption">
-                        {{ project.burndown_chart.current_remaining_effort|floatformat:2 }} estimated hours remain.
-                    </p>
-                    <ul class="chart-legend">
-                        <li><span class="chart-legend-swatch chart-legend-ideal"></span>Ideal</li>
-                        <li><span class="chart-legend-swatch chart-legend-actual"></span>Actual</li>
-                    </ul>
-                    {% else %}
-                    <p class="chart-caption">Add task estimates to see sprint burndown.</p>
-                    {% endif %}
-                </section>
-                {% endif %}
-                {% if project.velocity_sprints %}
-                <section class="dashboard-chart" aria-labelledby="velocity-heading-{{ project.pk }}">
-                    <h4 id="velocity-heading-{{ project.pk }}">Completed sprint velocity</h4>
-                    <ul class="velocity-chart">
-                        {% for sprint in project.velocity_sprints %}
-                        <li>
-                            <span>{{ sprint.name }}</span>
-                            <progress max="{{ project.velocity_chart_max }}" value="{{ sprint.velocity_effort }}">
-                                {{ sprint.velocity_effort }} estimated hours
-                            </progress>
-                            <strong>{{ sprint.velocity_effort|floatformat:2 }}h</strong>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                </section>
                 {% endif %}
                 <ul class="status-breakdown" aria-label="Task status breakdown">
                     {% for status in project.status_breakdown %}
@@ -176,6 +139,206 @@
             <a class="button" href="{% url 'projects:project-create' %}">Create your first project</a>
         </div>
         {% endif %}
+    </div>
+    {% endif %}
+</section>
+
+<section class="dashboard-sprint-analytics" aria-labelledby="sprint-analytics-heading">
+    <div class="dashboard-section-heading">
+        <div>
+            <h2 id="sprint-analytics-heading">Sprint Analytics</h2>
+            <p>Review saved sprint estimates, limited burndown history, and completed-sprint velocity.</p>
+        </div>
+    </div>
+
+    {% if sprint_analytics %}
+    <form class="sprint-selector-form" method="get" action="{% url 'projects:dashboard' %}">
+        {% for analytics in sprint_analytics %}
+        <div class="sprint-selector-field">
+            <label for="sprint-select-{{ analytics.project.pk }}">
+                {{ analytics.project.name }} sprint
+            </label>
+            <select id="sprint-select-{{ analytics.project.pk }}"
+                    name="sprint_{{ analytics.project.pk }}">
+                {% for sprint in analytics.sprints %}
+                <option value="{{ sprint.pk }}"
+                        {% if sprint.pk == analytics.selected_sprint.pk %}selected{% endif %}>
+                    {{ sprint.name }} ({{ sprint.start_date|date:"M j, Y" }} – {{ sprint.end_date|date:"M j, Y" }})
+                </option>
+                {% empty %}
+                <option value="">No sprints</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endfor %}
+        <button class="button button-secondary" type="submit">Update sprint analytics</button>
+    </form>
+
+    <div class="sprint-analytics-list">
+        {% for analytics in sprint_analytics %}
+        <article class="card sprint-analytics-card" aria-labelledby="sprint-analytics-project-{{ analytics.project.pk }}">
+            <h3 id="sprint-analytics-project-{{ analytics.project.pk }}">{{ analytics.project.name }}</h3>
+            {% if analytics.selected_sprint %}
+            <h4>{{ analytics.selected_sprint.name }}</h4>
+            <p class="sprint-date-range">
+                {{ analytics.selected_sprint.start_date|date:"M j, Y" }} –
+                {{ analytics.selected_sprint.end_date|date:"M j, Y" }}
+                <span class="status status-neutral">{{ analytics.selected_sprint.get_status_display }}</span>
+            </p>
+
+            <div class="sprint-effort-summary">
+                <p>
+                    <strong>Known estimated effort:</strong>
+                    {{ analytics.burndown.estimated_effort|floatformat:2 }} hours
+                </p>
+                <p>
+                    <strong>Current remaining estimated effort:</strong>
+                    {{ analytics.burndown.current_remaining_effort|floatformat:2 }} hours
+                    {% if analytics.burndown.current_remaining_missing_estimate_count %}
+                    &middot; {{ analytics.burndown.current_remaining_missing_estimate_count }}
+                    remaining task{{ analytics.burndown.current_remaining_missing_estimate_count|pluralize }}
+                    without an estimate
+                    {% endif %}
+                </p>
+            </div>
+
+            {% if analytics.selected_sprint.status == "PLANNED" %}
+            <p class="analytics-notice">This sprint is planned and has not started yet.</p>
+            {% elif not analytics.burndown.sprint_started %}
+            <p class="analytics-notice">This sprint has not started yet.</p>
+            {% endif %}
+            {% if analytics.burndown.task_count == 0 %}
+            <p class="analytics-notice">There are no tasks assigned to this sprint.</p>
+            {% elif analytics.burndown.estimated_task_count == 0 %}
+            <p class="analytics-notice">No sprint task has an estimated effort, so burndown cannot be calculated.</p>
+            {% elif not analytics.burndown.chart_available and analytics.burndown.sprint_started %}
+            <p class="analytics-notice">
+                Saved completion timestamps do not provide enough historical data for a burndown chart.
+            </p>
+            {% endif %}
+
+            {% if analytics.burndown.chart_available %}
+            <figure class="sprint-burndown-figure">
+                <svg class="sprint-burndown-chart" viewBox="0 0 600 220" role="img"
+                     aria-labelledby="burndown-title-{{ analytics.project.pk }} burndown-description-{{ analytics.project.pk }}">
+                    <title id="burndown-title-{{ analytics.project.pk }}">
+                        {{ analytics.selected_sprint.name }} remaining estimated effort
+                    </title>
+                    <desc id="burndown-description-{{ analytics.project.pk }}">
+                        Ideal and limited reconstructed actual remaining estimated effort in hours by sprint date.
+                    </desc>
+                    <line class="burndown-axis" x1="20" y1="180" x2="580" y2="180"></line>
+                    <line class="burndown-axis" x1="20" y1="20" x2="20" y2="180"></line>
+                    <polyline class="burndown-line burndown-line-ideal" fill="none"
+                              points="{% for point in analytics.burndown.chart_points %}{{ point.x }},{{ point.ideal_y }}{% if not forloop.last %} {% endif %}{% endfor %}"></polyline>
+                    <polyline class="burndown-line burndown-line-actual" fill="none"
+                              points="{% for point in analytics.burndown.chart_points %}{{ point.x }},{{ point.actual_y }}{% if not forloop.last %} {% endif %}{% endfor %}"></polyline>
+                    <text class="burndown-axis-label" x="300" y="214" text-anchor="middle">Sprint date</text>
+                    <text class="burndown-axis-label" transform="translate(12 100) rotate(-90)" text-anchor="middle">
+                        Remaining effort (hours)
+                    </text>
+                </svg>
+                <figcaption class="sprint-burndown-caption">
+                    <span><i class="burndown-legend-swatch burndown-legend-ideal"></i>Ideal</span>
+                    <span><i class="burndown-legend-swatch burndown-legend-actual"></i>Saved completion dates (limited)</span>
+                </figcaption>
+                <p class="analytics-notice">
+                    Limited reconstruction: only current DONE tasks' saved completion timestamps are available.
+                    Reopened tasks, prior estimate changes, and sprint-assignment changes are not retained as daily history.
+                </p>
+                <table class="visually-hidden">
+                    <caption>{{ analytics.selected_sprint.name }} burndown data in estimated hours</caption>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Ideal remaining</th><th scope="col">Saved completion remaining</th></tr></thead>
+                    <tbody>
+                        {% for point in analytics.burndown.chart_points %}
+                        <tr>
+                            <th scope="row">{{ point.date|date:"M j, Y" }}</th>
+                            <td>{{ point.ideal_remaining|floatformat:2 }}</td>
+                            <td>{{ point.actual_remaining|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </figure>
+            {% endif %}
+
+            <section class="sprint-velocity-summary" aria-label="Selected sprint velocity">
+                <h4>Sprint velocity</h4>
+                {% if analytics.selected_sprint.status == "COMPLETED" and analytics.selected_velocity %}
+                    <p>
+                        Completed tasks with estimates:
+                        {{ analytics.selected_velocity.estimated_task_count }} /
+                        {{ analytics.selected_velocity.completed_tasks }}.
+                        Missing estimates: {{ analytics.selected_velocity.missing_estimate_count }}.
+                    </p>
+                    {% if analytics.selected_velocity.missing_estimate_count %}
+                    <p>
+                        Partial known velocity: {{ analytics.selected_velocity.known_estimated_effort|floatformat:2 }}
+                        hours; complete velocity is unavailable until every completed task is estimated.
+                    </p>
+                    {% else %}
+                    <p>
+                        Velocity: {{ analytics.selected_velocity.velocity|floatformat:2 }} estimated effort hours.
+                    </p>
+                    {% endif %}
+                {% else %}
+                <p>Velocity is available after this sprint is completed.</p>
+                {% endif %}
+                <p class="analytics-help">
+                    Velocity is the sum of estimated effort for DONE tasks in a completed sprint;
+                    actual logged effort is not used.
+                </p>
+            </section>
+            {% else %}
+            <p class="analytics-notice">This project has no sprints yet.</p>
+            {% endif %}
+
+            <section class="sprint-history" aria-label="Completed sprint velocity comparison">
+                <h4>Completed sprint comparison</h4>
+                {% if analytics.completed_sprints %}
+                <div class="sprint-history-table-wrapper">
+                    <table class="sprint-history-table">
+                        <caption class="visually-hidden">Velocity for completed sprints in {{ analytics.project.name }}</caption>
+                        <thead>
+                            <tr>
+                                <th scope="col">Sprint</th>
+                                <th scope="col">Dates</th>
+                                <th scope="col">Velocity (estimated hours)</th>
+                                <th scope="col">Completed tasks missing estimates</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sprint_metric in analytics.completed_sprints %}
+                            <tr>
+                                <th scope="row">{{ sprint_metric.name }}</th>
+                                <td>
+                                    {{ sprint_metric.sprint.start_date|date:"M j, Y" }} –
+                                    {{ sprint_metric.sprint.end_date|date:"M j, Y" }}
+                                </td>
+                                <td>
+                                    {% if sprint_metric.velocity != None %}
+                                    {{ sprint_metric.velocity|floatformat:2 }}
+                                    {% else %}
+                                    Incomplete (known {{ sprint_metric.known_estimated_effort|floatformat:2 }})
+                                    {% endif %}
+                                </td>
+                                <td>{{ sprint_metric.missing_estimate_count }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p>No completed sprints are available for comparison.</p>
+                {% endif %}
+            </section>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card dashboard-empty-state">
+        <h3>No visible projects have sprint analytics</h3>
+        <p>Sprint analytics will appear for projects you are authorized to view.</p>
     </div>
     {% endif %}
 </section>

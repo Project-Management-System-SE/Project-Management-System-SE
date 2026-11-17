@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "accounts",
     "projects",
     "tasks",
+    "api",
 ]
 
 MIDDLEWARE = [
@@ -84,6 +85,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+DB_ENGINE = os.environ.get("DJANGO_DB_ENGINE", "sqlite3").strip().lower()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     DATABASES = {
@@ -93,15 +95,43 @@ if DATABASE_URL:
             conn_health_checks=True,
         )
     }
-elif not DEBUG:
-    raise ImproperlyConfigured("DATABASE_URL must be set when DEBUG is False.")
-else:
+elif "postgres" in DB_ENGINE:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DJANGO_DB_NAME", "pms_db"),
+            "USER": os.environ.get("DJANGO_DB_USER", "postgres"),
+            "PASSWORD": os.environ.get("DJANGO_DB_PASSWORD", ""),
+            "HOST": os.environ.get("DJANGO_DB_HOST", "localhost"),
+            "PORT": os.environ.get("DJANGO_DB_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "600")),
+        }
+    }
+elif "mysql" in DB_ENGINE:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ.get("DJANGO_DB_NAME", "pms_db"),
+            "USER": os.environ.get("DJANGO_DB_USER", "root"),
+            "PASSWORD": os.environ.get("DJANGO_DB_PASSWORD", ""),
+            "HOST": os.environ.get("DJANGO_DB_HOST", "localhost"),
+            "PORT": os.environ.get("DJANGO_DB_PORT", "3306"),
+            "CONN_MAX_AGE": int(os.environ.get("DJANGO_DB_CONN_MAX_AGE", "600")),
+        }
+    }
+elif DEBUG and DB_ENGINE in {"sqlite", "sqlite3"}:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": Path(
+                os.environ.get("DJANGO_DB_NAME", str(BASE_DIR / "db.sqlite3"))
+            ),
         }
     }
+elif not DEBUG:
+    raise ImproperlyConfigured("DATABASE_URL must be set when DEBUG is False.")
+else:
+    raise ImproperlyConfigured(f"Unsupported DJANGO_DB_ENGINE: {DB_ENGINE}.")
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -192,3 +222,9 @@ STORAGES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = "DENY"
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_HTTPONLY = True

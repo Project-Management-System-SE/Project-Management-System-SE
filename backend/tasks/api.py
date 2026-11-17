@@ -15,7 +15,7 @@ from .audit import changes_from_form, record_audit
 from .forms import TaskFilterForm, TaskForm
 from .models import AuditLog, Task
 from .notifications import notify_task_assignment, notify_task_status_change
-from .permissions import can_create_task_in, can_edit_task
+from .permissions import can_create_task_in, can_edit_task, can_reassign_task
 from .workflow import (
     initial_workflow_status,
     workflow_choices_for,
@@ -398,6 +398,15 @@ def api_project_task_detail(request, project_id, task_id):
     data, error = _task_form_data(payload, project, task=task)
     if error:
         return error
+    new_assignee = data.get("assignee")
+    if (
+        str(new_assignee or "") != str(task.assignee_id or "")
+        and not can_reassign_task(request.user, task)
+    ):
+        return JsonResponse(
+            {"error": "Only project managers can reassign tasks."},
+            status=403,
+        )
     previous_assignee_id = task.assignee_id
     previous_status = workflow_status_key(task)
     form = TaskForm(data=data, instance=task, project=project)

@@ -216,6 +216,22 @@ class ProjectTaskApiReadTests(TestCase):
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
 
+    def test_task_patch_requires_manager_permission_to_reassign(self):
+        self.client.force_login(self.member)
+
+        response = self.client.patch(
+            reverse(
+                "api-project-task-detail",
+                args=[self.project.pk, self.task.pk],
+            ),
+            data=json.dumps({"assignee": self.owner.pk}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.assignee, self.member)
+
     def test_task_delete_is_manager_only_and_audited(self):
         self.client.force_login(self.member)
         url = reverse(

@@ -20,3 +20,17 @@ def can_edit_task(user, task):
     if is_active_member and (task.assignee_id == user.pk or task.created_by_id == user.pk):
         return True
     return False
+
+
+def can_reassign_task(user, task):
+    """Only project managers, owners, and system admins can reassign tasks."""
+    if not user.is_authenticated:
+        return False
+    return can_manage_project(user, task.project)
+
+
+def can_delete_task(user, task):
+    """Only project managers, owners, and system admins can delete tasks."""
+    if not user.is_authenticated:
+        return False
+    return can_manage_project(user, task.project)

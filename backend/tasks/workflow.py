@@ -72,4 +72,27 @@ def allowed_status_transitions(status, project=None):
                 from_state__key=status,
             ).values_list("to_state__key", flat=True)
         )
+    if status == Task.Status.BACKLOG:
+        return STATUS_TRANSITIONS.get(status, set())
+    if project and project.workflow_transitions.exists():
+        from projects.workflow import get_allowed_transitions
+
+        return set(get_allowed_transitions(project, status))
     return STATUS_TRANSITIONS.get(status, set())
+
+
+def is_valid_workflow_transition(current_status, new_status, project, user=None):
+    if current_status == new_status:
+        return True
+    if workflow_states_for(project):
+        return new_status in allowed_status_transitions(current_status, project)
+    if project and project.workflow_transitions.exists():
+        from projects.workflow import is_valid_transition
+
+        return is_valid_transition(
+            project,
+            current_status,
+            new_status,
+            user=user,
+        )
+    return new_status in allowed_status_transitions(current_status, project)

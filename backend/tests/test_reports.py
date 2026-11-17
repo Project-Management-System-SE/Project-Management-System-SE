@@ -102,6 +102,13 @@ class ProjectReportTests(TestCase):
         )
         self.done_task.sprint = sprint
         self.done_task.save()
+        Task.objects.create(
+            project=self.project,
+            sprint=sprint,
+            title="Completed without estimate",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+        )
 
         response = self.client.get(
             reverse("projects:project-velocity-report", args=[self.project.pk])
@@ -110,7 +117,10 @@ class ProjectReportTests(TestCase):
         rows = self.read_report(response)
 
         self.assertEqual(rows[1][1], "Sprint 1")
-        self.assertEqual(rows[1][4:], ["1", "3", "4"])
+        self.assertEqual(
+            rows[1][4:],
+            ["2", "1", "1", "3", "", "4"],
+        )
 
     def test_workload_report_groups_tasks_by_member(self):
         response = self.client.get(
