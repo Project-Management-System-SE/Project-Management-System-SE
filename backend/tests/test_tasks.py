@@ -1005,19 +1005,32 @@ class TaskViewAndPermissionTests(TestCase):
             {"audit", "core"},
         )
 
-    def test_non_manager_cannot_create_task(self):
+    def test_project_member_can_create_task(self):
         self.client.login(email="member@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
 
         response = self.client.post(
             create_url,
             data={
-                "title": "Unauthorized Task",
+                "title": "Member-created Task",
                 "priority": "LOW",
                 "status": "TODO",
             },
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
+        task = Task.objects.get(title="Member-created Task")
+        self.assertEqual(task.created_by, self.member)
+
+    def test_outsider_cannot_create_task(self):
+        self.client.force_login(self.outsider)
+
+        response = self.client.post(
+            reverse("tasks:task-create", kwargs={"project_id": self.project.pk}),
+            {"title": "Outsider task", "priority": "LOW", "status": "TODO"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Task.objects.filter(title="Outsider task").exists())
 
     def test_create_rejects_outsider_assignee_without_persisting_task(self):
         self.client.force_login(self.owner)

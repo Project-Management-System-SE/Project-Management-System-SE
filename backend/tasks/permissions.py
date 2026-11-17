@@ -8,9 +8,7 @@ def can_view_tasks_for(user, project):
 
 
 def can_create_task_in(user, project):
-    if not user.is_authenticated:
-        return False
-    return can_manage_project(user, project)
+    return can_view_tasks_for(user, project)
 
 
 def can_edit_task(user, task):
