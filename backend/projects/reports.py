@@ -1,8 +1,9 @@
 import csv
 import io
-from decimal import Decimal
+from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from tasks.models import Task
@@ -52,46 +53,225 @@ def get_project_progress_metrics(project, start_date=None, end_date=None, sprint
     }
 
 
+def build_sprint_burndown(sprint, as_of=None):
+    """Build a limited burndown from current tasks' saved completion timestamps.
+
+    The task model does not retain daily status/estimate snapshots. Reopened tasks
+    and historical estimate or sprint-assignment changes therefore cannot be
+    reconstructed reliably from this data.
+    """
+    as_of = as_of or timezone.localdate()
+    tasks = list(
+        sprint.tasks.filter(project_id=sprint.project_id).only(
+            "status", "estimated_effort", "completed_at"
+        )
+    )
+    estimated_tasks = [task for task in tasks if task.estimated_effort is not None]
+    estimated_effort = sum(
+        (task.estimated_effort for task in estimated_tasks), Decimal("0.00")
+    )
+    current_remaining_effort = sum(
+        (
+            task.estimated_effort
+            for task in tasks
+            if task.status != Task.Status.DONE and task.estimated_effort is not None
+        ),
+        Decimal("0.00"),
+    )
+    completion_dates = {
+        task.pk: timezone.localtime(task.completed_at).date()
+        for task in tasks
+        if task.status == Task.Status.DONE and task.completed_at is not None
+    }
+
+    sprint_started = (
+        sprint.status != Sprint.Status.PLANNED and sprint.start_date <= as_of
+    )
+    chart_end_date = (
+        sprint.end_date
+        if sprint.status == Sprint.Status.COMPLETED
+        else min(sprint.end_date, as_of)
+    )
+    has_completion_data = any(
+        task.estimated_effort is not None
+        and completion_dates.get(task.pk) is not None
+        and completion_dates[task.pk] <= chart_end_date
+        for task in tasks
+    )
+    chart_available = bool(
+        tasks
+        and estimated_tasks
+        and sprint_started
+        and has_completion_data
+    )
+    points = []
+    if chart_available:
+        day_count = (chart_end_date - sprint.start_date).days
+        dates = [
+            sprint.start_date + timedelta(days=offset)
+            for offset in range(day_count + 1)
+        ]
+        if estimated_effort:
+            max_effort = estimated_effort
+        else:
+            max_effort = Decimal("1.00")
+
+        for date_index, point_date in enumerate(dates):
+            completed_effort = sum(
+                (
+                    task.estimated_effort
+                    for task in estimated_tasks
+                    if completion_dates.get(task.pk) is not None
+                    and completion_dates[task.pk] <= point_date
+                ),
+                Decimal("0.00"),
+            )
+            actual_remaining = estimated_effort - completed_effort
+            if day_count:
+                ideal_remaining = (
+                    estimated_effort
+                    * Decimal(day_count - date_index)
+                    / Decimal(day_count)
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            else:
+                ideal_remaining = Decimal("0.00")
+
+            points.append(
+                {
+                    "date": point_date,
+                    "ideal_remaining": ideal_remaining,
+                    "actual_remaining": actual_remaining,
+                }
+            )
+
+        chart_width = Decimal("560")
+        chart_height = Decimal("160")
+        for point_index, point in enumerate(points):
+            point["x"] = (
+                Decimal("300")
+                if len(points) == 1
+                else Decimal("20")
+                + chart_width * Decimal(point_index) / Decimal(len(points) - 1)
+            ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+            point["ideal_y"] = (
+                Decimal("20")
+                + chart_height
+                * (Decimal("1") - point["ideal_remaining"] / max_effort)
+            ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+            point["actual_y"] = (
+                Decimal("20")
+                + chart_height
+                * (Decimal("1") - point["actual_remaining"] / max_effort)
+            ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+    return {
+        "task_count": len(tasks),
+        "estimated_task_count": len(estimated_tasks),
+        "missing_estimate_count": len(tasks) - len(estimated_tasks),
+        "estimated_effort": estimated_effort,
+        "current_remaining_effort": current_remaining_effort,
+        "current_remaining_missing_estimate_count": sum(
+            task.status != Task.Status.DONE and task.estimated_effort is None
+            for task in tasks
+        ),
+        "chart_available": chart_available,
+        "chart_points": points,
+        "has_limited_history": True,
+        "sprint_started": sprint_started,
+        "has_completion_data": has_completion_data,
+    }
+
+
 def get_sprint_velocity_metrics(project):
-    """Calculates sprint velocity trends and average delivery velocity across closed sprints."""
-    sprints = project.sprints.all().order_by("start_date", "pk")
+    """Report completed-task estimated hours as sprint velocity.
+
+    A sprint with unestimated completed tasks has a known partial estimate but no
+    complete velocity value. Average velocity excludes those incomplete sprints.
+    """
+    completed_task_filter = Q(
+        tasks__project_id=project.pk,
+        tasks__status=Task.Status.DONE,
+    )
+    sprints = project.sprints.annotate(
+        total_tasks=Count(
+            "tasks",
+            filter=Q(tasks__project_id=project.pk),
+            distinct=True,
+        ),
+        completed_tasks=Count("tasks", filter=completed_task_filter, distinct=True),
+        estimated_task_count=Count(
+            "tasks",
+            filter=completed_task_filter & Q(tasks__estimated_effort__isnull=False),
+            distinct=True,
+        ),
+        known_estimated_effort=Sum(
+            "tasks__estimated_effort",
+            filter=completed_task_filter,
+        ),
+        total_estimated_effort=Sum(
+            "tasks__estimated_effort",
+            filter=Q(tasks__project_id=project.pk),
+        ),
+        completed_actual_effort=Sum(
+            "tasks__actual_effort",
+            filter=completed_task_filter,
+        ),
+    ).order_by("start_date", "pk")
     sprint_data = []
+    completed_sprint_count = 0
+    complete_velocity_sprint_count = 0
+    incomplete_sprint_count = 0
+    total_velocity = Decimal("0.00")
     total_completed_effort = Decimal("0.00")
-    closed_sprint_count = 0
 
     for s in sprints:
-        completed_tasks = s.tasks.filter(status=Task.Status.DONE)
-        completed_count = completed_tasks.count()
-        completed_effort = completed_tasks.aggregate(s=Sum("actual_effort"))["s"] or Decimal("0.00")
-        estimated_effort = s.tasks.aggregate(s=Sum("estimated_effort"))["s"] or Decimal("0.00")
-
         is_closed = (s.status == Sprint.Status.COMPLETED)
+        known_estimated_effort = s.known_estimated_effort or Decimal("0.00")
+        missing_estimate_count = s.completed_tasks - s.estimated_task_count
+        velocity = (
+            known_estimated_effort if missing_estimate_count == 0 else None
+        )
         if is_closed:
-            closed_sprint_count += 1
-            total_completed_effort += completed_effort
+            completed_sprint_count += 1
+            total_completed_effort += (
+                s.completed_actual_effort or Decimal("0.00")
+            )
+            if velocity is None:
+                incomplete_sprint_count += 1
+            else:
+                complete_velocity_sprint_count += 1
+                total_velocity += velocity
 
         sprint_data.append({
             "sprint": s,
             "name": s.name,
             "status": s.status,
-            "total_tasks": s.tasks.count(),
-            "completed_tasks": completed_count,
-            "estimated_effort": estimated_effort,
-            "completed_effort": completed_effort,
+            "total_tasks": s.total_tasks,
+            "completed_tasks": s.completed_tasks,
+            "estimated_effort": s.total_estimated_effort or Decimal("0.00"),
+            "estimated_task_count": s.estimated_task_count,
+            "missing_estimate_count": missing_estimate_count,
+            "velocity": velocity,
+            "known_estimated_effort": known_estimated_effort,
+            "completed_effort": s.completed_actual_effort or Decimal("0.00"),
             "is_closed": is_closed,
         })
 
-    avg_velocity = (
-        round(total_completed_effort / closed_sprint_count, 2)
-        if closed_sprint_count > 0
-        else Decimal("0.00")
-    )
+    average_velocity = None
+    if complete_velocity_sprint_count:
+        average_velocity = (total_velocity / complete_velocity_sprint_count).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
 
     return {
         "sprints": sprint_data,
-        "closed_sprint_count": closed_sprint_count,
+        "closed_sprint_count": completed_sprint_count,
+        "completed_sprint_count": completed_sprint_count,
+        "velocity_sprint_count": complete_velocity_sprint_count,
+        "incomplete_sprint_count": incomplete_sprint_count,
         "total_completed_effort": total_completed_effort,
-        "average_velocity": avg_velocity,
+        "total_velocity": total_velocity,
+        "average_velocity": average_velocity,
     }
 
 
@@ -217,10 +397,29 @@ def generate_summary_report_csv(project):
 
     writer.writerow(["SPRINT VELOCITY METRICS"])
     writer.writerow(["Closed Sprints Count", velocity["closed_sprint_count"]])
-    writer.writerow(["Average Velocity (Hours per Sprint)", velocity["average_velocity"]])
-    writer.writerow(["Sprint Name", "Status", "Total Tasks", "Completed Tasks", "Completed Effort (Hours)"])
+    writer.writerow([
+        "Average Velocity (Estimated Hours per Fully Estimated Completed Sprint)",
+        velocity["average_velocity"] if velocity["average_velocity"] is not None else "Incomplete data",
+    ])
+    writer.writerow([
+        "Sprint Name",
+        "Status",
+        "Total Tasks",
+        "Completed Tasks",
+        "Velocity (Estimated Hours)",
+        "Completed Actual Effort (Hours)",
+        "Completed Tasks Missing Estimate",
+    ])
     for s in velocity["sprints"]:
-        writer.writerow([s["name"], s["status"], s["total_tasks"], s["completed_tasks"], s["completed_effort"]])
+        writer.writerow([
+            s["name"],
+            s["status"],
+            s["total_tasks"],
+            s["completed_tasks"],
+            s["velocity"] if s["velocity"] is not None else "Incomplete data",
+            s["completed_effort"],
+            s["missing_estimate_count"],
+        ])
     writer.writerow([])
 
     writer.writerow(["TEAM WORKLOAD DISTRIBUTION"])

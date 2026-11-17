@@ -49,9 +49,14 @@
         <span class="text-muted">Active tasks in flight</span>
     </div>
     <div class="card stat-card">
-        <span class="stat-label">Average Velocity</span>
-        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #8b5cf6;">{{ velocity.average_velocity }}h</span>
-        <span class="text-muted">Across {{ velocity.closed_sprint_count }} closed sprint(s)</span>
+        <span class="stat-label">Average Velocity (estimated hours)</span>
+        <span class="stat-value" style="font-size: 1.8rem; font-weight: 700; color: #8b5cf6;">
+            {% if velocity.average_velocity != None %}{{ velocity.average_velocity }}h{% else %}Unavailable{% endif %}
+        </span>
+        <span class="text-muted">
+            Across {{ velocity.velocity_sprint_count }} completed sprint(s) with complete estimates;
+            {{ velocity.incomplete_sprint_count }} excluded for missing estimates.
+        </span>
     </div>
     <div class="card stat-card">
         <span class="stat-label">Overdue Tasks</span>

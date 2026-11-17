@@ -7,7 +7,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from accounts.models import User
-from projects.models import Project, ProjectMembership
+from projects.models import Project, ProjectMembership, Sprint
 from tasks.models import Task
 
 
@@ -280,6 +280,122 @@ class DashboardViewTests(TestCase):
             [project.name for project in response.context["projects"]],
             ["Visible project"],
         )
+
+    def test_dashboard_sprint_selector_is_project_scoped_and_uses_saved_velocity(self):
+        project = Project.objects.create(name="Sprint analytics", owner=self.owner)
+        active_sprint = Sprint.objects.create(
+            project=project,
+            name="Current sprint",
+            status=Sprint.Status.ACTIVE,
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 14),
+        )
+        completed_sprint = Sprint.objects.create(
+            project=project,
+            name="Completed sprint",
+            status=Sprint.Status.COMPLETED,
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 14),
+        )
+        Task.objects.create(
+            project=project,
+            sprint=completed_sprint,
+            title="Completed estimated task",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+            estimated_effort=Decimal("4.25"),
+            actual_effort=Decimal("99.00"),
+        )
+        hidden_owner = create_user("sprint-hidden@example.com", "sprint-hidden", "Hidden")
+        hidden_project = Project.objects.create(name="Hidden sprint project", owner=hidden_owner)
+        hidden_sprint = Sprint.objects.create(
+            project=hidden_project,
+            name="Hidden sprint",
+            status=Sprint.Status.COMPLETED,
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 14),
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("projects:dashboard"),
+            {f"sprint_{project.pk}": str(completed_sprint.pk)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        analytics = next(
+            item
+            for item in response.context["sprint_analytics"]
+            if item["project"] == project
+        )
+        self.assertEqual(analytics["selected_sprint"], completed_sprint)
+        self.assertEqual(
+            analytics["selected_velocity"]["velocity"], Decimal("4.25")
+        )
+        self.assertContains(response, "4.25 estimated effort hours")
+        self.assertContains(response, "Completed sprint")
+        self.assertNotContains(response, "Hidden sprint")
+
+        cross_project_response = self.client.get(
+            reverse("projects:dashboard"),
+            {f"sprint_{project.pk}": str(hidden_sprint.pk)},
+        )
+        analytics = next(
+            item
+            for item in cross_project_response.context["sprint_analytics"]
+            if item["project"] == project
+        )
+        self.assertEqual(analytics["selected_sprint"], active_sprint)
+
+    def test_project_owner_manager_and_team_member_can_view_sprint_analytics(self):
+        project = Project.objects.create(name="Authorized analytics", owner=self.owner)
+        manager = create_user("analytics-manager@example.com", "analytics-manager", "Manager")
+        member = create_user("analytics-member@example.com", "analytics-member", "Member")
+        outsider = create_user("analytics-outsider@example.com", "analytics-outsider", "Outsider")
+        ProjectMembership.objects.create(
+            project=project,
+            user=manager,
+            project_role=ProjectMembership.Role.PROJECT_MANAGER,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        Sprint.objects.create(
+            project=project,
+            name="Visible sprint",
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 14),
+        )
+
+        for user in (self.owner, manager, member):
+            with self.subTest(user=user.username):
+                self.client.force_login(user)
+                response = self.client.get(reverse("projects:dashboard"))
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Visible sprint")
+                self.assertEqual(len(response.context["sprint_analytics"]), 1)
+
+        self.client.force_login(outsider)
+        outsider_response = self.client.get(reverse("projects:dashboard"))
+        self.assertEqual(outsider_response.context["sprint_analytics"], [])
+        self.assertNotContains(outsider_response, "Visible sprint")
+
+    def test_dashboard_shows_empty_sprint_analytics_state(self):
+        project = Project.objects.create(name="No sprint project", owner=self.owner)
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:dashboard"))
+
+        analytics = next(
+            item
+            for item in response.context["sprint_analytics"]
+            if item["project"] == project
+        )
+        self.assertIsNone(analytics["selected_sprint"])
+        self.assertIsNone(analytics["burndown"])
+        self.assertContains(response, "This project has no sprints yet.")
 
 
 class MyTasksViewTests(TestCase):
