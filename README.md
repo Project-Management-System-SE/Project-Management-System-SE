@@ -54,7 +54,8 @@ Project-Management-System/
 ├── static/                 # Static assets: CSS, JavaScript, and images
 └── .github/
     └── workflows/
-        └── tests.yml       # GitHub Actions automated test workflow
+        ├── tests.yml         # GitHub Actions automated test workflow
+        └── deploy-render.yml # Gated Render deployment workflow
 ```
 
 ---
@@ -282,3 +283,35 @@ To restore, load the fixture with `python backend\manage.py loaddata <database.j
 archive's `media` files to `DJANGO_MEDIA_ROOT`. On a fresh database, apply migrations before loading
 the fixture. Backups contain personal data and password hashes; restrict access and encrypt them at
 rest.
+
+### Render deployment
+
+The application supports Render PostgreSQL through `DATABASE_URL`, serves collected static assets
+with WhiteNoise, and exposes `/health/` as a database-aware health check. Set the Render web
+service's **Root Directory** to `backend` and configure:
+
+- **Build command:** `python -m pip install -r requirements.txt && python manage.py collectstatic --noinput`
+- **Start command:** `python manage.py migrate --noinput && python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`
+- **Health check path:** `/health/`
+
+`backend/requirements.txt` installs Gunicorn, Psycopg, `dj-database-url`, and WhiteNoise. The
+`python -m gunicorn` invocation uses the same Python environment that installed the dependencies.
+Attach a Render PostgreSQL database and set `DATABASE_URL` to its internal connection string.
+`DATABASE_URL` is required when `DJANGO_DEBUG=false`; startup fails rather than falling back to
+SQLite if it is missing. Also configure `DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`,
+`DJANGO_ALLOWED_HOSTS`, and `DJANGO_TRUST_X_FORWARDED_PROTO=true`. Production enables HTTPS
+redirect, secure cookies, and one-year HSTS by default; only reduce `DJANGO_SECURE_HSTS_SECONDS`
+if HTTPS is not permanently available. Leave HSTS subdomain and preload options disabled unless
+every affected hostname is HTTPS-only and you intentionally want the browser-preload commitment.
+Set `DJANGO_MEDIA_ROOT=/var/data/media` and attach persistent storage mounted at `/var/data`, or
+configure durable object storage; Render's service filesystem is ephemeral and task attachments
+would otherwise be lost on redeploy. Configure the SMTP environment variables above for
+registration and password-reset email.
+
+The **Render CD** workflow is gated on successful CI for a push to `main`. To require manual approval,
+create a GitHub environment named `production`, add required reviewers to its protection rules, and
+save the Render service's deploy-hook URL as the environment secret `RENDER_DEPLOY_HOOK_URL`. The
+workflow then waits for approval before asking Render to deploy. Create the Render service and
+database, configure its persistent media storage and environment variables, and connect it to the
+`main` branch before enabling this workflow. Creating these external resources may incur provider
+charges; confirm the selected plans in Render before provisioning them.

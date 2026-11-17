@@ -5,10 +5,12 @@ from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 
 from accounts import views as account_views
+from config.health import health_check
 from tasks import api as task_api
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("health/", health_check, name="health-check"),
     path("accounts/login/", account_views.LoginView.as_view(), name="login"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", account_views.register, name="register"),
