@@ -45,6 +45,15 @@
     <p><strong>Owner:</strong> {{ project.owner.full_name|default:project.owner.email }}</p>
 </section>
 
+<section class="card" aria-labelledby="project-reports-heading">
+    <h2 id="project-reports-heading">Download project reports</h2>
+    <ul class="project-report-links">
+        <li><a href="{% url 'projects:project-progress-report' project.pk %}">Progress summary (CSV)</a></li>
+        <li><a href="{% url 'projects:project-velocity-report' project.pk %}">Sprint velocity (CSV)</a></li>
+        <li><a href="{% url 'projects:project-workload-report' project.pk %}">Team workload (CSV)</a></li>
+    </ul>
+</section>
+
 <section class="card" aria-labelledby="project-members-heading">
     <h2 id="project-members-heading">Project members</h2>
     {% if memberships %}
