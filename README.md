@@ -258,3 +258,27 @@ must follow the project's workflow. For example:
 
 The API currently uses session/CSRF authentication; it does not issue personal access tokens and does
 not include bundled Slack or GitHub connectors.
+
+### HTTPS and backups
+
+For deployments, set `DJANGO_DEBUG=false`, a strong `DJANGO_SECRET_KEY`, and `DJANGO_ALLOWED_HOSTS`.
+With debug disabled, HTTPS redirects and secure session/CSRF cookies are enabled by default; override
+them only when the deployment topology requires it. If TLS terminates at a reverse proxy, set
+`DJANGO_TRUST_X_FORWARDED_PROTO=true` only when that proxy removes any client-supplied
+`X-Forwarded-Proto` header and writes its own. Enable HSTS with `DJANGO_SECURE_HSTS_SECONDS` only
+after confirming HTTPS is permanent for the deployment domain.
+
+Create a compressed database and uploaded-media backup with:
+
+```powershell
+python backend\manage.py backup_database
+```
+
+By default, archives are written to `backend\backups`; set `DJANGO_BACKUP_DIR` or pass `--output-dir`
+to select protected storage outside the web root and repository. Schedule this command daily using
+Windows Task Scheduler or the deployment scheduler, and periodically test restore procedures. Each
+archive contains a Django `database.json` fixture, a manifest, and files from `DJANGO_MEDIA_ROOT`.
+To restore, load the fixture with `python backend\manage.py loaddata <database.json>` and restore the
+archive's `media` files to `DJANGO_MEDIA_ROOT`. On a fresh database, apply migrations before loading
+the fixture. Backups contain personal data and password hashes; restrict access and encrypt them at
+rest.
