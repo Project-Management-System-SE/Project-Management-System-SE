@@ -1,15 +1,28 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods, require_POST
 
 from config.notifications import create_notifications
+from tasks.audit import changes_from_form, record_audit
+from tasks.models import AuditLog, Task
 
-from .forms import ProjectForm, ProjectMemberForm, ProjectUpdateForm
-from .models import Project, ProjectMembership
+from .forms import (
+    MilestoneForm,
+    ProjectForm,
+    ProjectMemberForm,
+    ProjectSearchForm,
+    ProjectUpdateForm,
+    SprintForm,
+)
+from .models import Milestone, Project, ProjectMembership, Sprint, SprintTaskHistory
 from .permissions import (
     can_create_project,
     can_manage_project,
@@ -17,7 +30,6 @@ from .permissions import (
     manageable_project_ids_for,
     visible_projects_for,
 )
-from tasks.models import Task
 
 
 def _manageable_project_or_403(user, project_id):
@@ -25,6 +37,17 @@ def _manageable_project_or_403(user, project_id):
     if not can_manage_project(user, project):
         raise PermissionDenied
     return project
+
+
+def _projects_with_task_progress(projects):
+    return projects.annotate(
+        task_count=Count("tasks", distinct=True),
+        completed_task_count=Count(
+            "tasks",
+            filter=Q(tasks__status=Task.Status.DONE),
+            distinct=True,
+        ),
+    )
 
 
 @login_required
@@ -40,14 +63,44 @@ def dashboard(request):
     projects = list(
         visible_projects.annotate(
             total_task_count=Count("tasks", distinct=True),
+            total_estimated_effort=Coalesce(
+                Sum("tasks__estimated_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            total_actual_effort=Coalesce(
+                Sum("tasks__actual_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
             **{
                 f"{status_value.lower()}_task_count": count
                 for status_value, count in status_counts.items()
             },
         )
     )
+    active_sprints = {
+        sprint.project_id: sprint
+        for sprint in Sprint.objects.filter(
+            project_id__in=[project.pk for project in projects],
+            status=Sprint.Status.ACTIVE,
+        ).annotate(
+            task_count=Count("tasks"),
+            estimated_effort=Coalesce(
+                Sum("tasks__estimated_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            actual_effort=Coalesce(
+                Sum("tasks__actual_effort"),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+        )
+    }
 
     for project in projects:
+        project.active_sprint = active_sprints.get(project.pk)
         project.status_breakdown = [
             {
                 "value": status_value,
@@ -102,9 +155,276 @@ def dashboard(request):
 
 
 @login_required
+def sprint_list(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    sprints = project.sprints.annotate(
+        task_count=Count("tasks"),
+        completed_task_count=Count(
+            "tasks", filter=Q(tasks__status=Task.Status.DONE)
+        ),
+        estimated_effort=Coalesce(
+            Sum("tasks__estimated_effort"),
+            Value(0),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        ),
+        actual_effort=Coalesce(
+            Sum("tasks__actual_effort"),
+            Value(0),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        ),
+    )
+    milestones = project.milestones.annotate(
+        task_count=Count("tasks"),
+        completed_task_count=Count(
+            "tasks", filter=Q(tasks__status=Task.Status.DONE)
+        ),
+    )
+    for milestone in milestones:
+        milestone.completion_percentage = (
+            round(milestone.completed_task_count * 100 / milestone.task_count)
+            if milestone.task_count
+            else 0
+        )
+    return render(
+        request,
+        "sprint_list.html",
+        {
+            "project": project,
+            "sprints": sprints,
+            "milestones": milestones,
+            "can_manage": can_manage_project(request.user, project),
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def sprint_create(request, project_id):
+    project = _managed_project_or_403(request.user, project_id)
+    if request.method == "POST":
+        form = SprintForm(request.POST, project=project)
+        if form.is_valid():
+            sprint = form.save(commit=False)
+            sprint.created_by = request.user
+            sprint.project = project
+            sprint.save()
+            messages.success(request, "Sprint created successfully.")
+            return redirect("projects:sprint-detail", project_id=project.pk, sprint_id=sprint.pk)
+    else:
+        form = SprintForm(project=project)
+    return render(
+        request,
+        "sprint_form.html",
+        {
+            "form": form,
+            "project": project,
+            "is_update": False,
+            "page_heading": f"Create sprint | {project.name}",
+        },
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def sprint_update(request, project_id, sprint_id):
+    sprint = _managed_sprint(request.user, project_id, sprint_id)
+    if request.method == "POST":
+        form = SprintForm(request.POST, instance=sprint, project=sprint.project)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Sprint updated successfully.")
+            return redirect(
+                "projects:sprint-detail",
+                project_id=sprint.project_id,
+                sprint_id=sprint.pk,
+            )
+    else:
+        form = SprintForm(instance=sprint, project=sprint.project)
+    return render(
+        request,
+        "sprint_form.html",
+        {
+            "form": form,
+            "project": sprint.project,
+            "sprint": sprint,
+            "is_update": True,
+            "page_heading": f"Edit {sprint.name} | {sprint.project.name}",
+        },
+    )
+
+
+@login_required
+def sprint_detail(request, project_id, sprint_id):
+    project = _visible_project_or_404(request.user, project_id)
+    sprint = get_object_or_404(project.sprints, pk=sprint_id)
+    tasks = sprint.tasks.select_related("assignee", "created_by").prefetch_related("labels")
+    return render(
+        request,
+        "sprint_detail.html",
+        {
+            "project": project,
+            "sprint": sprint,
+            "tasks": tasks,
+            "can_manage": can_manage_project(request.user, project),
+        },
+    )
+
+
+@login_required
+@require_POST
+def sprint_activate(request, project_id, sprint_id):
+    sprint = _managed_sprint(request.user, project_id, sprint_id)
+    if sprint.status != Sprint.Status.PLANNED:
+        raise PermissionDenied("Only planned sprints can be activated.")
+    if sprint.end_date < sprint.start_date:
+        raise PermissionDenied("Sprint dates are invalid.")
+    with transaction.atomic():
+        sprint.status = Sprint.Status.ACTIVE
+        sprint.save(update_fields=["status", "updated_at"])
+    messages.success(request, "Sprint activated successfully.")
+    return redirect("projects:sprint-detail", project_id=project_id, sprint_id=sprint_id)
+
+
+@login_required
+@require_POST
+def sprint_close(request, project_id, sprint_id):
+    sprint = _managed_sprint(request.user, project_id, sprint_id)
+    if sprint.status != Sprint.Status.ACTIVE:
+        raise PermissionDenied("Only active sprints can be closed.")
+    destination_id = request.POST.get("carry_over_sprint")
+    destination = None
+    if destination_id:
+        destination = get_object_or_404(
+            sprint.project.sprints,
+            pk=destination_id,
+        )
+        if destination.status not in (Sprint.Status.PLANNED, Sprint.Status.ACTIVE):
+            raise PermissionDenied("Tasks can only be carried to an eligible sprint.")
+        if destination.pk == sprint.pk:
+            raise PermissionDenied("Tasks cannot be carried over to the same sprint.")
+
+    with transaction.atomic():
+        incomplete_tasks = list(
+            sprint.tasks.exclude(status=Task.Status.DONE).select_for_update()
+        )
+        for task in incomplete_tasks:
+            previous_sprint_id = task.sprint_id
+            SprintTaskHistory.objects.create(
+                task=task,
+                sprint=sprint,
+                carried_over=destination is not None,
+                carried_over_to=destination,
+                event_type="CARRY_OVER" if destination else "RETURN_TO_BACKLOG",
+                carry_over_reason=request.POST.get("note", "").strip(),
+                actor=request.user,
+                carried_over_at=timezone.now(),
+                task_status=task.status,
+            )
+            task.sprint = destination
+            task.save(update_fields=["sprint", "updated_at"])
+            record_audit(
+                request.user,
+                AuditLog.Action.UPDATE,
+                task,
+                changes={
+                    "sprint": {
+                        "from": previous_sprint_id,
+                        "to": destination.pk if destination else None,
+                    }
+                },
+            )
+        sprint.status = Sprint.Status.COMPLETED
+        sprint.save(update_fields=["status", "updated_at"])
+    messages.success(request, "Sprint closed and incomplete tasks carried over.")
+    return redirect("projects:sprint-detail", project_id=project_id, sprint_id=sprint_id)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def milestone_create(request, project_id):
+    project = _managed_project_or_403(request.user, project_id)
+    if request.method == "POST":
+        form = MilestoneForm(request.POST, project=project)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Milestone created successfully.")
+            return redirect("projects:sprint-list", project_id=project.pk)
+    else:
+        form = MilestoneForm(project=project)
+    return render(
+        request,
+        "milestone_form.html",
+        {"form": form, "project": project, "page_heading": f"Create milestone | {project.name}"},
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def milestone_update(request, project_id, milestone_id):
+    project = _managed_project_or_403(request.user, project_id)
+    milestone = get_object_or_404(project.milestones, pk=milestone_id)
+    if request.method == "POST":
+        form = MilestoneForm(request.POST, instance=milestone, project=project)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Milestone updated successfully.")
+            return redirect("projects:sprint-list", project_id=project.pk)
+    else:
+        form = MilestoneForm(instance=milestone, project=project)
+    return render(
+        request,
+        "milestone_form.html",
+        {
+            "form": form,
+            "project": project,
+            "milestone": milestone,
+            "page_heading": f"Edit {milestone.name} | {project.name}",
+        },
+    )
+
+
+@login_required
+def project_backlog(request, project_id):
+    project = _visible_project_or_404(request.user, project_id)
+    tasks = project.tasks.filter(sprint__isnull=True).select_related(
+        "assignee", "created_by", "milestone"
+    ).prefetch_related("labels")
+    return render(
+        request,
+        "project_backlog.html",
+        {"project": project, "tasks": tasks},
+    )
+
+
+def _visible_project_or_404(user, project_id):
+    return get_object_or_404(visible_projects_for(user), pk=project_id)
+
+
+def _require_project_manager(user, project):
+    if not can_manage_project(user, project):
+        raise PermissionDenied
+
+
+def _managed_project_or_403(user, project_id):
+    project = get_object_or_404(Project, pk=project_id)
+    _require_project_manager(user, project)
+    return project
+
+
+def _managed_sprint(user, project_id, sprint_id):
+    project = _managed_project_or_403(user, project_id)
+    return get_object_or_404(project.sprints, pk=sprint_id)
+
+
+@login_required
 def project_list(request):
-    projects = visible_projects_for(request.user)
-    search_query = request.GET.get("q", "").strip()
+    projects = _projects_with_task_progress(visible_projects_for(request.user))
+    search_form = ProjectSearchForm(request.GET)
+    if search_form.is_valid():
+        search_query = search_form.cleaned_data["q"]
+    else:
+        search_query = ""
+        projects = projects.none()
     selected_status = request.GET.get("status", "")
 
     if search_query:
@@ -117,13 +437,22 @@ def project_list(request):
     if selected_status:
         projects = projects.filter(status=selected_status)
 
+    manageable_project_ids = manageable_project_ids_for(request.user, projects)
+    project_parameters = request.GET.copy()
+    project_parameters.pop("page", None)
+    project_query = project_parameters.urlencode()
+    page_obj = Paginator(projects, 20).get_page(request.GET.get("page"))
+
     context = {
-        "projects": projects,
+        "projects": page_obj,
+        "page_obj": page_obj,
+        "page_query": project_query,
+        "search_form": search_form,
         "search_query": search_query,
         "selected_status": selected_status,
         "project_status_choices": Project.Status.choices,
         "can_create_project": can_create_project(request.user),
-        "manageable_project_ids": manageable_project_ids_for(request.user, projects),
+        "manageable_project_ids": manageable_project_ids,
     }
     return render(request, "projects.html", context)
 
@@ -146,6 +475,7 @@ def project_create(request):
                     user=request.user,
                     project_role=ProjectMembership.Role.PROJECT_MANAGER,
                 )
+                record_audit(request.user, AuditLog.Action.CREATE, project)
 
             messages.success(request, "Project created successfully.")
             return redirect("projects:project-list")
@@ -179,6 +509,44 @@ def project_detail(request, project_id):
 
 
 @login_required
+def project_activity(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is not None:
+        activity = AuditLog.objects.filter(
+            project=project
+        ).select_related("actor", "task")
+        context = {"project": project, "project_name": project.name}
+    else:
+        deletion_entry = AuditLog.objects.filter(
+            object_type=AuditLog.ObjectType.PROJECT,
+            object_id=project_id,
+            project_id__isnull=True,
+        ).order_by("-timestamp", "-pk").first()
+        if deletion_entry is None or (
+            not request.user.is_admin
+            and request.user.pk not in deletion_entry.authorized_user_ids
+        ):
+            raise Http404
+        activity = AuditLog.objects.filter(
+            project_id_snapshot=project_id
+        ).select_related("actor", "task")
+        context = {
+            "project": None,
+            "project_name": deletion_entry.project_name,
+            "deleted_project": True,
+        }
+    page_obj = Paginator(activity.order_by("-timestamp", "-pk"), 50).get_page(
+        request.GET.get("page")
+    )
+    context.update({"activity": page_obj, "page_obj": page_obj})
+    return render(
+        request,
+        "project_activity.html",
+        context,
+    )
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def project_update(request, project_id):
     project = _manageable_project_or_403(request.user, project_id)
@@ -187,8 +555,16 @@ def project_update(request, project_id):
         form = ProjectUpdateForm(request.POST, instance=project)
         if form.is_valid():
             with transaction.atomic():
+                changes = changes_from_form(form)
                 form.save()
                 ensure_project_owner_membership(project)
+                if changes:
+                    record_audit(
+                        request.user,
+                        AuditLog.Action.UPDATE,
+                        project,
+                        changes=changes,
+                    )
             messages.success(request, "Project details updated successfully.")
             return redirect("projects:project-detail", project_id=project.pk)
     else:
@@ -291,8 +667,21 @@ def project_remove_member(request, project_id, membership_id):
 def project_archive(request, project_id):
     project = _manageable_project_or_403(request.user, project_id)
     if project.status != Project.Status.ARCHIVED:
+        previous_status = project.status
         project.status = Project.Status.ARCHIVED
-        project.save(update_fields=["status", "updated_at"])
+        with transaction.atomic():
+            project.save(update_fields=["status", "updated_at"])
+            record_audit(
+                request.user,
+                AuditLog.Action.UPDATE,
+                project,
+                changes={
+                    "status": {
+                        "from": previous_status,
+                        "to": project.status,
+                    }
+                },
+            )
     messages.success(request, "Project archived successfully.")
     return redirect("projects:project-detail", project_id=project.pk)
 
@@ -304,7 +693,9 @@ def project_delete(request, project_id):
 
     if request.method == "POST":
         project_name = project.name
-        project.delete()
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, project)
+            project.delete()
         messages.success(request, f"{project_name} was deleted.")
         return redirect("projects:project-list")
 

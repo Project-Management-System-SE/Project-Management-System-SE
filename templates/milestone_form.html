@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_heading }} | PMS{% endblock %}
+{% block page_heading %}<h1>{{ page_heading }}</h1>{% endblock %}
+
+{% block content %}
+<section class="project-form-intro">
+    <h2>{% if milestone %}Edit milestone{% else %}Create milestone{% endif %}</h2>
+    <p>Track a project delivery target for {{ project.name }}.</p>
+</section>
+<form class="card project-form" method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-errors" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}
+    <div class="form-field">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.errors %}<div class="field-errors" role="alert">{{ field.errors }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    <div class="project-form-actions">
+        <button type="submit">Save milestone</button>
+        <a class="button button-secondary" href="{% url 'projects:sprint-list' project.pk %}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,5 +1,13 @@
+import csv
+import io
+import struct
+import uuid
+import zipfile
+import zlib
+from pathlib import Path
+
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models
 from django.db.models.signals import m2m_changed
 from django.dispatch import receiver
@@ -83,6 +91,148 @@ class WorkflowTransition(models.Model):
         return f"{self.from_state.name} -> {self.to_state.name}"
 
 
+def _is_valid_png(content):
+    if not content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return False
+
+    offset = 8
+    has_header = False
+    has_image_data = False
+    while offset + 12 <= len(content):
+        chunk_size = struct.unpack(">I", content[offset : offset + 4])[0]
+        chunk_type = content[offset + 4 : offset + 8]
+        chunk_end = offset + 12 + chunk_size
+        if chunk_end > len(content):
+            return False
+
+        chunk_data = content[offset + 8 : offset + 8 + chunk_size]
+        expected_crc = struct.unpack(">I", content[offset + 8 + chunk_size : chunk_end])[0]
+        if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
+            return False
+
+        if not has_header:
+            if chunk_type != b"IHDR" or chunk_size != 13:
+                return False
+            width, height = struct.unpack(">II", chunk_data[:8])
+            if width == 0 or height == 0:
+                return False
+            has_header = True
+        elif chunk_type == b"IHDR":
+            return False
+
+        if chunk_type == b"IDAT":
+            has_image_data = True
+        if chunk_type == b"IEND":
+            return chunk_size == 0 and has_header and has_image_data and chunk_end == len(content)
+
+        offset = chunk_end
+
+    return False
+
+
+def _is_valid_office_zip(extension, content):
+    required_parts = {
+        "docx": {"[Content_Types].xml", "word/document.xml"},
+        "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
+    }[extension]
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            return required_parts.issubset(archive.namelist())
+    except (OSError, zipfile.BadZipFile, zipfile.LargeZipFile):
+        return False
+
+
+def _attachment_content_matches(extension, content):
+    if extension in {"txt", "csv"}:
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return False
+        if any(ord(character) < 32 and character not in "\t\n\r\f" for character in text):
+            return False
+        if extension == "csv":
+            try:
+                for _ in csv.reader(io.StringIO(text, newline=""), strict=True):
+                    pass
+            except csv.Error:
+                return False
+        return True
+
+    if extension == "pdf":
+        return content.startswith(b"%PDF-") and b"%%EOF" in content[-1024:]
+    if extension == "png":
+        return _is_valid_png(content)
+    if extension in {"jpg", "jpeg"}:
+        return content.startswith(b"\xff\xd8\xff") and content.endswith(b"\xff\xd9")
+    if extension == "gif":
+        return (
+            content.startswith((b"GIF87a", b"GIF89a"))
+            and len(content) >= 14
+            and struct.unpack("<HH", content[6:10]) != (0, 0)
+            and content.endswith(b";")
+        )
+    if extension in {"doc", "xls"}:
+        return (
+            content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+            and len(content) >= 512
+            and content[28:30] in {b"\xfe\xff", b"\xff\xfe"}
+            and struct.unpack("<H", content[30:32])[0] in {9, 12}
+        )
+    if extension in {"docx", "xlsx"}:
+        return _is_valid_office_zip(extension, content)
+    return False
+
+
+def validate_task_attachment(uploaded_file):
+    extension = Path(uploaded_file.name).suffix.lower().lstrip(".")
+    allowed_extensions = settings.TASK_ATTACHMENT_ALLOWED_EXTENSIONS
+    if extension not in allowed_extensions:
+        allowed_types = ", ".join(f".{item}" for item in allowed_extensions)
+        raise ValidationError(
+            f"Unsupported file type. Allowed file types: {allowed_types}."
+        )
+
+    max_size = settings.TASK_ATTACHMENT_MAX_SIZE_BYTES
+    if uploaded_file.size > max_size:
+        raise ValidationError(
+            f"File must be no larger than {task_attachment_max_size_label()}."
+        )
+    if uploaded_file.size == 0:
+        raise ValidationError("The uploaded file is empty.")
+
+    try:
+        content = uploaded_file.read(max_size + 1)
+        if len(content) > max_size:
+            raise ValidationError(
+                f"File must be no larger than {task_attachment_max_size_label()}."
+            )
+        if not content:
+            raise ValidationError("The uploaded file is empty.")
+        if not _attachment_content_matches(extension, content):
+            raise ValidationError(
+                f"The file contents do not match the .{extension} file type. "
+                f"Please choose a valid .{extension} file."
+            )
+    except (OSError, EOFError, ValueError):
+        raise ValidationError("The uploaded file could not be read.") from None
+    finally:
+        uploaded_file.seek(0)
+
+
+def task_attachment_max_size_label():
+    max_size = settings.TASK_ATTACHMENT_MAX_SIZE_BYTES
+    if max_size % (1024 * 1024) == 0:
+        return f"{max_size // (1024 * 1024)} MB"
+    if max_size % 1024 == 0:
+        return f"{max_size // 1024} KB"
+    return f"{max_size} bytes"
+
+
+def task_attachment_upload_path(instance, filename):
+    extension = Path(filename).suffix.lower()
+    return f"tasks/{instance.task_id}/{uuid.uuid4().hex}{extension}"
+
+
 class TaskLabel(models.Model):
     project = models.ForeignKey(
         "projects.Project",
@@ -134,6 +284,20 @@ class Task(models.Model):
         on_delete=models.CASCADE,
         related_name="tasks",
     )
+    sprint = models.ForeignKey(
+        "projects.Sprint",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
+    milestone = models.ForeignKey(
+        "projects.Milestone",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
+    )
     title = models.CharField(max_length=250)
     description = models.TextField(blank=True)
     priority = models.CharField(
@@ -152,6 +316,18 @@ class Task(models.Model):
         null=True,
         blank=True,
         related_name="tasks",
+    )
+    estimated_effort = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    actual_effort = models.DecimalField(
+        max_digits=7,
+        decimal_places=2,
+        null=True,
+        blank=True,
     )
     due_date = models.DateField(null=True, blank=True)
     assignee = models.ForeignKey(
@@ -190,6 +366,20 @@ class Task(models.Model):
                 ),
                 name="task_priority_valid_choice",
             ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(estimated_effort__isnull=True)
+                    | models.Q(estimated_effort__gte=0)
+                ),
+                name="task_estimated_effort_non_negative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(actual_effort__isnull=True)
+                    | models.Q(actual_effort__gte=0)
+                ),
+                name="task_actual_effort_non_negative",
+            ),
         ]
         indexes = [
             models.Index(
@@ -199,6 +389,14 @@ class Task(models.Model):
             models.Index(
                 fields=["project", "-created_at"],
                 name="task_project_created_idx",
+            ),
+            models.Index(
+                fields=["project", "sprint", "status"],
+                name="task_project_sprint_status_idx",
+            ),
+            models.Index(
+                fields=["project", "milestone"],
+                name="task_project_milestone_idx",
             ),
         ]
 
@@ -230,6 +428,12 @@ class Task(models.Model):
                 raise ValidationError(
                     {"assignee": "The assignee must be an authorized member of the project."}
                 )
+        if self.sprint_id and self.project_id and self.sprint.project_id != self.project_id:
+            raise ValidationError({"sprint": "The sprint must belong to the task's project."})
+        if self.milestone_id and self.project_id and self.milestone.project_id != self.project_id:
+            raise ValidationError(
+                {"milestone": "The milestone must belong to the task's project."}
+            )
 
     def save(self, *args, **kwargs):
         if self.title:
@@ -290,6 +494,96 @@ class Task(models.Model):
         return f"{self.title} ({self.project.name})"
 
 
+class AuditLogQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise PermissionDenied("Audit entries cannot be updated.")
+
+    def delete(self):
+        raise PermissionDenied("Audit entries cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise PermissionDenied("Audit entries cannot be updated.")
+
+    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, **kwargs):
+        raise PermissionDenied(
+            "Audit entries must be created through the audit recorder."
+        )
+
+
+class AuditLogManager(models.Manager.from_queryset(AuditLogQuerySet)):
+    pass
+
+
+class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATE = "CREATE", "Created"
+        UPDATE = "UPDATE", "Updated"
+        DELETE = "DELETE", "Deleted"
+
+    class ObjectType(models.TextChoices):
+        PROJECT = "PROJECT", "Project"
+        TASK = "TASK", "Task"
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    actor_name = models.CharField(max_length=255, blank=True)
+    action = models.CharField(max_length=10, choices=Action.choices)
+    object_type = models.CharField(max_length=10, choices=ObjectType.choices)
+    object_id = models.PositiveBigIntegerField(null=True, blank=True)
+    object_name = models.CharField(max_length=250)
+    project_id_snapshot = models.PositiveBigIntegerField(null=True, blank=True)
+    project = models.ForeignKey(
+        "projects.Project",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    project_name = models.CharField(max_length=200, blank=True)
+    authorized_user_ids = models.JSONField(default=list, blank=True)
+    task = models.ForeignKey(
+        "tasks.Task",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="audit_log_entries",
+    )
+    timestamp = models.DateTimeField(auto_now_add=True)
+    description = models.TextField()
+    changes = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-timestamp", "-pk"]
+        indexes = [
+            models.Index(
+                fields=["project", "-timestamp"],
+                name="audit_project_timestamp_idx",
+            ),
+            models.Index(
+                fields=["object_type", "object_id"],
+                name="audit_object_idx",
+            ),
+        ]
+
+    objects = AuditLogManager()
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise PermissionDenied("Audit entries are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionDenied("Audit entries cannot be deleted.")
+
+    def __str__(self):
+        return f"{self.get_action_display()} {self.object_type.lower()} {self.object_name}"
+
+
 class TaskComment(models.Model):
     task = models.ForeignKey(
         Task,
@@ -301,7 +595,7 @@ class TaskComment(models.Model):
         on_delete=models.RESTRICT,
         related_name="task_comments",
     )
-    body = models.TextField()
+    content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -309,6 +603,27 @@ class TaskComment(models.Model):
 
     def __str__(self):
         return f"Comment by {self.author} on {self.task}"
+
+
+class TaskAttachment(models.Model):
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="attachments")
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.RESTRICT,
+        related_name="task_attachments",
+    )
+    file = models.FileField(
+        upload_to=task_attachment_upload_path,
+        validators=[validate_task_attachment],
+    )
+    original_filename = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "pk"]
+
+    def __str__(self):
+        return f"{self.original_filename} attached to {self.task}"
 
 
 class TaskDueReminder(models.Model):

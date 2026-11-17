@@ -55,6 +55,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+CSRF_FAILURE_VIEW = "config.csrf.csrf_failure"
+
 ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
@@ -105,6 +107,19 @@ EMAIL_HOST_PASSWORD = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = env_bool("DJANGO_EMAIL_USE_TLS")
 EMAIL_USE_SSL = env_bool("DJANGO_EMAIL_USE_SSL")
 DEFAULT_FROM_EMAIL = os.environ.get("DJANGO_DEFAULT_FROM_EMAIL", "webmaster@localhost")
+
+MEDIA_ROOT = Path(os.environ.get("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media")))
+TASK_ATTACHMENT_MAX_SIZE_BYTES = int(
+    os.environ.get("TASK_ATTACHMENT_MAX_SIZE_BYTES", str(10 * 1024 * 1024))
+)
+TASK_ATTACHMENT_ALLOWED_EXTENSIONS = tuple(
+    extension.strip().lower().lstrip(".")
+    for extension in os.environ.get(
+        "TASK_ATTACHMENT_ALLOWED_EXTENSIONS",
+        "pdf,txt,csv,png,jpg,jpeg,gif,doc,docx,xls,xlsx",
+    ).split(",")
+    if extension.strip()
+)
 
 AUTH_PASSWORD_VALIDATORS = [
     {

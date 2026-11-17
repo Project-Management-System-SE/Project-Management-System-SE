@@ -206,7 +206,7 @@ class NotificationTests(TestCase):
                 "tasks:task-add-comment",
                 args=[self.project.pk, self.task.pk],
             ),
-            {"body": "Release notes are ready."},
+            {"content": "Release notes are ready."},
         )
 
         self.assertEqual(response.status_code, 302)

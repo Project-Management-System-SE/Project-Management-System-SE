@@ -9,7 +9,7 @@
 {% block content %}
 <section class="card" aria-labelledby="delete-task-heading">
     <h2 id="delete-task-heading">Delete “{{ task.title }}”?</h2>
-    <p>This permanently deletes the task, its comments, and due-date reminders. This action cannot be undone.</p>
+    <p>This action cannot be undone. Its activity history will be retained.</p>
     <form method="post">
         {% csrf_token %}
         <div class="project-form-actions">

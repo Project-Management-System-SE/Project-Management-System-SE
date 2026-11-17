@@ -102,11 +102,7 @@ class WorkflowConfigurationTests(TestCase):
             },
         )
 
-        self.assertEqual(
-            create_response.status_code,
-            302,
-            str(create_response.context["form"].errors),
-        )
+        self.assertEqual(create_response.status_code, 302)
         task = Task.objects.get(title="Custom workflow task")
         self.assertEqual(task.workflow_state.key, "OPEN")
         self.assertEqual(task.get_status_display(), "Open")

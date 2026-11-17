@@ -1,6 +1,10 @@
 from django.contrib import admin
+from django.db import transaction
 
-from .models import Project, ProjectMembership
+from tasks.audit import changes_from_form, record_audit
+from tasks.models import AuditLog
+
+from .models import Milestone, Project, ProjectMembership, Sprint, SprintTaskHistory
 
 
 class ProjectMembershipInline(admin.TabularInline):
@@ -15,9 +19,44 @@ class ProjectAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "owner__username", "owner__email")
     inlines = [ProjectMembershipInline]
 
+    def save_model(self, request, obj, form, change):
+        with transaction.atomic():
+            super().save_model(request, obj, form, change)
+            action = AuditLog.Action.UPDATE if change else AuditLog.Action.CREATE
+            changes = changes_from_form(form) if change else None
+            if not change or changes:
+                record_audit(request.user, action, obj, changes=changes)
+
+    def delete_model(self, request, obj):
+        with transaction.atomic():
+            record_audit(request.user, AuditLog.Action.DELETE, obj)
+            super().delete_model(request, obj)
+
 
 @admin.register(ProjectMembership)
 class ProjectMembershipAdmin(admin.ModelAdmin):
     list_display = ("project", "user", "project_role", "joined_at")
     list_filter = ("project_role",)
     search_fields = ("project__name", "user__username", "user__email")
+
+
+@admin.register(Sprint)
+class SprintAdmin(admin.ModelAdmin):
+    list_display = ("name", "project", "status", "start_date", "end_date", "created_by")
+    list_filter = ("status", "project")
+    search_fields = ("name", "goal", "project__name")
+
+
+@admin.register(Milestone)
+class MilestoneAdmin(admin.ModelAdmin):
+    list_display = ("name", "project", "status", "target_date")
+    list_filter = ("status", "project")
+    search_fields = ("name", "description", "project__name")
+
+
+@admin.register(SprintTaskHistory)
+class SprintTaskHistoryAdmin(admin.ModelAdmin):
+    list_display = ("task", "sprint", "carried_over_to", "event_type", "actor", "recorded_at")
+    list_filter = ("event_type", "sprint")
+    search_fields = ("task__title", "sprint__name")
+    readonly_fields = ("recorded_at",)

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}My Tasks | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>My Tasks</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="my-tasks-heading">
+    <div>
+        <h2 id="my-tasks-heading">Tasks assigned to me</h2>
+        <p>Review tasks assigned to you across your visible projects.</p>
+    </div>
+</section>
+
+{% if tasks %}
+<ul class="projects-list">
+    {% for task in tasks %}
+    <li class="card project-list-card">
+        <div class="project-list-heading">
+            <h3>
+                <a href="{% url 'tasks:task-detail' task.project_id task.pk %}">
+                    {{ task.title }}
+                </a>
+            </h3>
+            <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
+                {{ task.get_status_display }}
+            </span>
+        </div>
+        <p>
+            Project:
+            <a href="{% url 'projects:project-detail' task.project_id %}">{{ task.project.name }}</a>
+        </p>
+        <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
+        <div class="task-board-meta">
+            <span>Priority: <strong>{{ task.get_priority_display }}</strong></span>
+            <span>Due: <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
+        </div>
+        {% if task.labels.all %}
+        <div class="task-labels-list">
+            {% for label in task.labels.all %}
+            <span class="task-label">{{ label.name }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<div class="card projects-empty-state">
+    <h3>No tasks assigned to you</h3>
+    <p>Tasks assigned to you in your visible projects will appear here.</p>
+</div>
+{% endif %}
+{% endblock %}

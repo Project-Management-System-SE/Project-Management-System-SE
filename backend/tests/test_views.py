@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.db import IntegrityError
@@ -122,6 +123,7 @@ class DashboardViewTests(TestCase):
         self.assertContains(response, "33%")
         self.assertContains(response, "Unassigned")
         self.assertContains(response, 'href="/projects/new/"')
+        self.assertContains(response, 'href="/my-tasks/"')
 
     def test_dashboard_renders_empty_state_for_project_manager(self):
         self.client.force_login(self.admin)
@@ -131,6 +133,67 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "No projects to show yet")
         self.assertContains(response, "Create your first project")
+
+    def test_dashboard_aggregates_visible_project_effort_and_defaults_missing_values(self):
+        effort_project = Project.objects.create(
+            name="Effort project",
+            owner=self.owner,
+        )
+        empty_project = Project.objects.create(
+            name="Empty effort project",
+            owner=self.owner,
+        )
+        hidden_owner = create_user(
+            "hidden-effort@example.com",
+            "hidden-effort",
+            "Hidden Effort Owner",
+        )
+        hidden_project = Project.objects.create(
+            name="Hidden effort project",
+            owner=hidden_owner,
+        )
+        Task.objects.create(
+            project=effort_project,
+            title="Estimated and actual",
+            created_by=self.owner,
+            estimated_effort=Decimal("3.25"),
+            actual_effort=Decimal("4.50"),
+        )
+        Task.objects.create(
+            project=effort_project,
+            title="Estimated only",
+            created_by=self.owner,
+            estimated_effort=Decimal("1.75"),
+        )
+        Task.objects.create(
+            project=hidden_project,
+            title="Hidden effort",
+            created_by=hidden_owner,
+            estimated_effort=Decimal("99.00"),
+            actual_effort=Decimal("99.00"),
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        effort_summary = next(
+            project
+            for project in response.context["projects"]
+            if project == effort_project
+        )
+        empty_summary = next(
+            project
+            for project in response.context["projects"]
+            if project == empty_project
+        )
+        self.assertEqual(effort_summary.total_estimated_effort, Decimal("5.00"))
+        self.assertEqual(effort_summary.total_actual_effort, Decimal("4.50"))
+        self.assertEqual(empty_summary.total_estimated_effort, Decimal("0.00"))
+        self.assertEqual(empty_summary.total_actual_effort, Decimal("0.00"))
+        self.assertContains(response, "5.00 hours")
+        self.assertContains(response, "4.50 hours")
+        self.assertNotContains(response, "Hidden effort project")
 
     def test_dashboard_includes_all_visible_projects(self):
         for index in range(6):
@@ -228,6 +291,79 @@ class DashboardViewTests(TestCase):
         )
 
 
+class MyTasksViewTests(TestCase):
+    def setUp(self):
+        self.owner = create_user("owner@example.com", "owner", "Project Owner")
+        self.member = create_user("member@example.com", "member", "Team Member")
+        self.outsider = create_user("outsider@example.com", "outsider", "Outsider")
+        self.project = Project.objects.create(name="Visible project", owner=self.owner)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        self.visible_task = Task.objects.create(
+            project=self.project,
+            title="Assigned task",
+            created_by=self.owner,
+            assignee=self.member,
+        )
+
+    def test_my_tasks_shows_only_assigned_tasks_in_visible_projects(self):
+        hidden_project = Project.objects.create(
+            name="Hidden project",
+            owner=self.outsider,
+        )
+        hidden_membership = ProjectMembership.objects.create(
+            project=hidden_project,
+            user=self.member,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        Task.objects.create(
+            project=hidden_project,
+            title="Hidden task",
+            created_by=self.outsider,
+            assignee=self.member,
+        )
+        hidden_membership.delete()
+        Task.objects.create(
+            project=self.project,
+            title="Unassigned task",
+            created_by=self.owner,
+        )
+
+        self.client.force_login(self.member)
+        response = self.client.get(reverse("tasks:my-tasks"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            list(response.context["tasks"].values_list("pk", flat=True)),
+            [self.visible_task.pk],
+        )
+        self.assertContains(response, "Assigned task")
+        self.assertContains(response, "Visible project")
+        self.assertNotContains(response, "Hidden task")
+        self.assertContains(
+            response,
+            reverse(
+                "tasks:task-detail",
+                kwargs={
+                    "project_id": self.project.pk,
+                    "task_id": self.visible_task.pk,
+                },
+            ),
+        )
+
+    def test_my_tasks_requires_login(self):
+        response = self.client.get(reverse("tasks:my-tasks"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            f"{reverse('login')}?next={reverse('tasks:my-tasks')}",
+        )
+
+
 class ProjectVisibilityTests(TestCase):
     def setUp(self):
         self.owner = create_user("owner@example.com", "owner", "Project Owner")
@@ -268,6 +404,26 @@ class ProjectVisibilityTests(TestCase):
         response = self.client.get(reverse("projects:project-list"))
 
         self.assertIn(self.project, response.context["projects"])
+
+    def test_project_list_renders_task_completion_progress(self):
+        Task.objects.create(
+            project=self.project,
+            title="Completed task",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+        )
+        Task.objects.create(
+            project=self.project,
+            title="Open task",
+            created_by=self.owner,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("projects:project-list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "<progress", html=False)
+        self.assertContains(response, ">50%</span>")
 
     def test_admin_sees_all_projects(self):
         other_owner = create_user("other@example.com", "other", "Other Owner")
@@ -332,7 +488,70 @@ class ProjectViewTests(TestCase):
         self.assertContains(response, "Release planning")
         self.assertContains(response, "Prepare the upcoming release")
         self.assertContains(response, "On Hold")
-        self.assertContains(response, "Progress unavailable")
+        self.assertContains(response, "No tasks yet")
+
+    def test_project_search_matches_name_or_description_within_visible_projects(self):
+        matching_project = Project.objects.create(
+            name="Release planning",
+            description="Prepare for the winter launch",
+            owner=self.owner,
+        )
+        hidden_owner = create_user("hidden@example.com", "hidden", "Hidden Owner")
+        Project.objects.create(
+            name="Hidden release planning",
+            description="Secret project",
+            owner=hidden_owner,
+        )
+        self.client.force_login(self.owner)
+
+        name_response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Release planning"},
+        )
+        description_response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "winter launch"},
+        )
+
+        self.assertEqual(list(name_response.context["projects"]), [matching_project])
+        self.assertEqual(
+            list(description_response.context["projects"]),
+            [matching_project],
+        )
+        self.assertNotContains(name_response, "Hidden release planning")
+
+    def test_project_search_empty_results_and_clear_link(self):
+        Project.objects.create(name="Available project", owner=self.owner)
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "no matching project"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["projects"]), [])
+        self.assertContains(response, "No matching projects")
+        self.assertContains(response, "Clear")
+
+    def test_project_list_paginates_filtered_results_and_preserves_search(self):
+        for index in range(21):
+            Project.objects.create(name=f"Paged project {index}", owner=self.owner)
+        self.client.force_login(self.owner)
+
+        first_page = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Paged"},
+        )
+        second_page = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "Paged", "page": "2"},
+        )
+
+        self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
+        self.assertEqual(len(first_page.context["projects"]), 20)
+        self.assertContains(first_page, "q=Paged&amp;page=2")
+        self.assertEqual(len(second_page.context["projects"]), 1)
 
     def test_project_list_search_and_status_filters_can_be_combined(self):
         matching_project = Project.objects.create(
