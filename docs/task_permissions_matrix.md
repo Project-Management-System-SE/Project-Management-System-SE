@@ -13,6 +13,7 @@ This specification details the role-based and project-level authorization rules 
 4. **Team Member**:
    - User assigned the `TEAM_MEMBER` role via `ProjectMembership`.
    - Authorized to view all tasks in the project.
+   - Authorized to create tasks in projects where they have active membership.
    - Authorized to edit tasks where they are either the designated `assignee` or `created_by`.
    - Cannot reassign tasks to other team members without managerial privileges.
    - Cannot delete tasks.
@@ -27,7 +28,7 @@ This specification details the role-based and project-level authorization rules 
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **View Task List** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403/404) |
 | **View Task Details** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403/404) |
-| **Create Task** | Allowed | Allowed | Denied (by default) | Denied | Denied | Denied (403) |
+| **Create Task** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403) |
 | **Edit Task Content** | Allowed | Allowed | Allowed | Allowed | Denied | Denied (403) |
 | **Update Task Status** | Allowed | Allowed | Allowed | Allowed | Denied | Denied (403) |
 | **Reassign Task** | Allowed | Allowed | Denied | Denied | Denied | Denied (403) |

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}Create account | PMS{% endblock %}
+{% block title %}Create account | Fieldwork{% endblock %}
+{% block body_class %}auth-page{% endblock %}
 
 {% block page_heading %}
 <h1>Create account</h1>
@@ -8,35 +9,40 @@
 
 {% block content %}
 <div class="auth-layout">
-<section class="project-form-intro" aria-labelledby="register-heading">
-    <h2 id="register-heading">Join your workspace</h2>
-    <p>Create an account with your name, email address, and password.</p>
-</section>
+    <div class="auth-content">
+        {% include "registration/_auth_brand.html" %}
+        <section class="project-form-intro" aria-labelledby="register-heading">
+            <span class="auth-eyebrow">GET STARTED</span>
+            <h2 id="register-heading">Create your account</h2>
+            <p>A shared space for the work that matters.</p>
+        </section>
 
-<form class="card project-form auth-form" method="post">
-    {% csrf_token %}
+        <form class="card project-form auth-form" method="post" autocomplete="on">
+            {% csrf_token %}
 
-    {% if form.non_field_errors %}
-    <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
-    {% endif %}
+            {% if form.non_field_errors %}
+            <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+            {% endif %}
 
-    {% for field in form %}
-    <div class="form-field">
-        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-        {{ field }}
-        {% if field.help_text %}
-        <div class="field-help">{{ field.help_text }}</div>
-        {% endif %}
-        {% if field.errors %}
-        <div class="field-errors" role="alert">{{ field.errors }}</div>
-        {% endif %}
+            {% for field in form %}
+            <div class="form-field">
+                <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                <div class="field-help">{{ field.help_text }}</div>
+                {% endif %}
+                {% if field.errors %}
+                <div class="field-errors" role="alert">{{ field.errors }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+
+            <div class="project-form-actions">
+                <button class="auth-submit" type="submit">Create account <span aria-hidden="true">→</span></button>
+            </div>
+            <p class="auth-switch">Already registered? <a href="{% url 'login' %}">Sign in</a></p>
+        </form>
     </div>
-    {% endfor %}
-
-    <div class="project-form-actions">
-        <button type="submit">Create account</button>
-    </div>
-    <p>Already registered? <a href="{% url 'login' %}">Log in</a>.</p>
-</form>
+    {% include "registration/_welcome_panel.html" %}
 </div>
 {% endblock %}

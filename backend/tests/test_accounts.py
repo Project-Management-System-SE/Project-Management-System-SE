@@ -6,9 +6,11 @@ from django.conf import settings
 from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.http import urlsafe_base64_encode
 
 from accounts.forms import RegistrationForm
 from accounts.models import User
+from accounts.tokens import email_confirmation_token
 
 
 class RegistrationFormTests(TestCase):
@@ -67,6 +69,7 @@ class RegistrationViewTests(TestCase):
         self.assertEqual(user.full_name, "New Member")
         self.assertTrue(user.username)
         self.assertTrue(user.check_password("new-safe-password-123!"))
+        self.assertFalse(user.is_active)
         self.assertFalse(user.is_staff)
         self.assertFalse(user.is_superuser)
         self.assertFalse(user.is_admin)
@@ -76,13 +79,99 @@ class RegistrationViewTests(TestCase):
         self.assertEqual(confirmation_email.to, ["new.member@example.com"])
         self.assertEqual(confirmation_email.from_email, settings.DEFAULT_FROM_EMAIL)
         self.assertIn("New Member", confirmation_email.body)
-        self.assertIn("account has been created successfully", confirmation_email.body)
+        self.assertIn("Confirm your email address", confirmation_email.body)
+
+        unverified_login_response = self.client.post(
+            reverse("login"),
+            {"username": user.email, "password": "new-safe-password-123!"},
+        )
+        self.assertEqual(unverified_login_response.status_code, 200)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+        confirmation_path = re.search(r"https?://\S+", confirmation_email.body)
+        self.assertIsNotNone(confirmation_path)
+        response = self.client.get(
+            urlsplit(confirmation_path.group()).path,
+            follow=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Your email address is confirmed")
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
 
         login_response = self.client.post(
             reverse("login"),
             {"username": user.email, "password": "new-safe-password-123!"},
         )
         self.assertRedirects(login_response, reverse("projects:dashboard"))
+
+    def test_invalid_confirmation_link_does_not_activate_an_account(self):
+        user = User.objects.create_user(
+            email="new.member@example.com",
+            username="new-member",
+            full_name="New Member",
+            password="new-safe-password-123!",
+            is_active=False,
+        )
+        uidb64 = urlsafe_base64_encode(str(user.pk).encode())
+
+        response = self.client.get(
+            reverse(
+                "email-confirm",
+                kwargs={"uidb64": uidb64, "token": "invalid-token"},
+            )
+        )
+
+        self.assertRedirects(response, reverse("login"))
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    @override_settings(PASSWORD_RESET_TIMEOUT=-1)
+    def test_expired_confirmation_link_is_rejected(self):
+        user = User.objects.create_user(
+            email="new.member@example.com",
+            username="new-member",
+            full_name="New Member",
+            password="new-safe-password-123!",
+            is_active=False,
+        )
+        response = self.client.get(
+            reverse(
+                "email-confirm",
+                kwargs={
+                    "uidb64": urlsafe_base64_encode(str(user.pk).encode()),
+                    "token": email_confirmation_token.make_token(user),
+                },
+            )
+        )
+
+        self.assertRedirects(response, reverse("login"))
+        user.refresh_from_db()
+        self.assertFalse(user.is_active)
+
+    def test_confirmation_link_cannot_be_reused(self):
+        user = User.objects.create_user(
+            email="new.member@example.com",
+            username="new-member",
+            full_name="New Member",
+            password="new-safe-password-123!",
+            is_active=False,
+        )
+        confirmation_url = reverse(
+            "email-confirm",
+            kwargs={
+                "uidb64": urlsafe_base64_encode(str(user.pk).encode()),
+                "token": email_confirmation_token.make_token(user),
+            },
+        )
+
+        first_response = self.client.get(confirmation_url)
+        second_response = self.client.get(confirmation_url)
+
+        self.assertRedirects(first_response, reverse("login"))
+        self.assertRedirects(second_response, reverse("login"))
+        user.refresh_from_db()
+        self.assertTrue(user.is_active)
 
     def test_registration_page_renders_required_fields_and_links_from_login(self):
         registration_response = self.client.get(reverse("register"))

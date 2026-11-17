@@ -24,6 +24,11 @@ urlpatterns = [
         name="project-task-list",
     ),
     path(
+        "projects/<int:project_id>/workflow/configure/",
+        views.workflow_configure,
+        name="workflow-configure",
+    ),
+    path(
         "projects/<int:project_id>/tasks/new/",
         views.task_create,
         name="task-create",

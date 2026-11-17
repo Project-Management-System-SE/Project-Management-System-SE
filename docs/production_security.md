@@ -25,7 +25,9 @@ This document records the production security posture, access control enforcemen
 ## 3. Defense Against Common Vulnerabilities
 - **Cross-Site Request Forgery (CSRF)**:
   - `CsrfViewMiddleware` is globally active.
-  - State-altering endpoints require CSRF token validation.
+  - Session-authenticated state-altering endpoints require CSRF token validation.
+  - Token API mutations are CSRF-exempt and require a valid API token in the
+    `Authorization` header.
 - **Cross-Site Scripting (XSS)**:
   - Django template auto-escaping is enforced across all templates.
   - Server-side validation actively rejects HTML script injection (`<script>`, `javascript:`).

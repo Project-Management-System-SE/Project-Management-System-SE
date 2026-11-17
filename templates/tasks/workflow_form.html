@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}Configure workflow | {{ project.name }} | PMS{% endblock %}
+
+{% block page_heading %}
+<h1>Configure workflow</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro">
+    <div>
+        <h2>{{ project.name }}</h2>
+        <p>Define the states shown on this project's Kanban board and the transitions tasks may follow.</p>
+    </div>
+</section>
+
+<section class="card project-form" aria-labelledby="workflow-form-heading">
+    <h2 id="workflow-form-heading">Workflow settings</h2>
+    <form method="post">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+        <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+        <div class="form-field">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<p class="form-help">{{ field.help_text }}</p>{% endif %}
+            {% if field.errors %}<div class="field-errors" role="alert">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="project-form-actions">
+            <button type="submit">Save workflow</button>
+            <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">Cancel</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

@@ -10,7 +10,6 @@ from django.views.decorators.http import require_http_methods
 
 from projects.models import Project, Sprint, Milestone
 from projects.permissions import visible_projects_for, can_manage_project
-from projects.workflow import is_valid_transition
 from tasks.models import Task
 from tasks.permissions import (
     can_view_tasks_for,
@@ -18,6 +17,12 @@ from tasks.permissions import (
     can_edit_task,
     can_delete_task,
     can_reassign_task,
+)
+from tasks.workflow import (
+    is_valid_workflow_transition,
+    set_task_workflow_status,
+    workflow_choices_for,
+    workflow_status_key,
 )
 from .auth import api_auth_required
 from .helpers import (
@@ -213,16 +218,26 @@ def task_status_api(request, task_id):
         return error_response("Invalid JSON payload.", status=400)
 
     new_status = body.get("status")
-    if not new_status or new_status not in Task.Status.values:
-        return error_response(f"Invalid status '{new_status}'. Allowed: {list(Task.Status.values)}", status=400)
-
-    if not is_valid_transition(task.project, task.status, new_status):
+    valid_statuses = [value for value, _ in workflow_choices_for(task.project)]
+    if not new_status or new_status not in valid_statuses:
         return error_response(
-            f"Transition from '{task.status}' to '{new_status}' is not permitted by project workflow rules.",
+            f"Invalid status '{new_status}'. Allowed: {valid_statuses}",
             status=400,
         )
 
-    task.status = new_status
+    current_status = workflow_status_key(task)
+    if not is_valid_workflow_transition(
+        current_status,
+        new_status,
+        task.project,
+        user=request.user,
+    ):
+        return error_response(
+            f"Transition from '{current_status}' to '{new_status}' is not permitted by project workflow rules.",
+            status=400,
+        )
+
+    set_task_workflow_status(task, new_status, task.project)
     task.save()
     return success_response(serialize_task(task), message="Task status updated successfully.")
 

@@ -483,13 +483,21 @@ def project_list(request):
     projects = _projects_with_task_progress(visible_projects_for(request.user))
     search_form = ProjectSearchForm(request.GET)
     if search_form.is_valid():
-        query = search_form.cleaned_data["q"]
-        if query:
-            projects = projects.filter(
-                Q(name__icontains=query) | Q(description__icontains=query)
-            )
+        search_query = search_form.cleaned_data["q"]
     else:
+        search_query = ""
         projects = projects.none()
+    selected_status = request.GET.get("status", "")
+
+    if search_query:
+        projects = projects.filter(
+            Q(name__icontains=search_query)
+            | Q(description__icontains=search_query)
+        )
+    if selected_status not in dict(Project.Status.choices):
+        selected_status = ""
+    if selected_status:
+        projects = projects.filter(status=selected_status)
 
     manageable_project_ids = manageable_project_ids_for(request.user, projects)
     project_parameters = request.GET.copy()
@@ -502,6 +510,9 @@ def project_list(request):
         "page_obj": page_obj,
         "page_query": project_query,
         "search_form": search_form,
+        "search_query": search_query,
+        "selected_status": selected_status,
+        "project_status_choices": Project.Status.choices,
         "can_create_project": can_create_project(request.user),
         "manageable_project_ids": manageable_project_ids,
     }

@@ -12,6 +12,13 @@ from .models import (
     TaskLabel,
     task_attachment_max_size_label,
 )
+from .workflow import (
+    allowed_status_transitions,
+    initial_workflow_status,
+    set_task_workflow_status,
+    workflow_choices_for,
+    workflow_states_for,
+)
 
 User = get_user_model()
 
@@ -41,6 +48,11 @@ class TaskFilterForm(forms.Form):
         required=False,
         empty_label="All labels",
     )
+    sprint = forms.ModelChoiceField(
+        queryset=Sprint.objects.none(),
+        required=False,
+        empty_label="All sprints",
+    )
 
     def __init__(self, *args, project, **kwargs):
         super().__init__(*args, **kwargs)
@@ -52,9 +64,13 @@ class TaskFilterForm(forms.Form):
             .order_by("full_name", "email")
         )
         self.fields["label"].queryset = project.labels.order_by("name")
+        self.fields["sprint"].queryset = project.sprints.order_by(
+            "-start_date", "-pk"
+        )
 
 
 class TaskForm(forms.ModelForm):
+    status = forms.ChoiceField(choices=Task.Status.choices)
     estimated_effort = forms.DecimalField(
         required=False,
         max_digits=7,
@@ -105,12 +121,64 @@ class TaskForm(forms.ModelForm):
 
         if self.instance and self.instance.pk:
             self.project = self.instance.project
+            current_status = (
+                self.instance.workflow_state.key
+                if self.instance.workflow_state_id
+                else self.instance.status
+            )
             if not self.is_bound:
                 self.fields["labels"].initial = self.instance.get_labels_as_string()
         elif project:
             self.project = project
+            current_status = None
         else:
             self.project = getattr(self.instance, "project", None)
+            current_status = None
+
+        workflow_states = workflow_states_for(self.project)
+        choices = workflow_choices_for(self.project)
+        if workflow_states and current_status is None:
+            initial_status = initial_workflow_status(self.project)
+            allowed_statuses = {initial_status}
+            invalid_status_message = "New tasks must start in the workflow's initial state."
+        elif current_status is None:
+            allowed_statuses = {Task.Status.BACKLOG, Task.Status.TODO}
+            invalid_status_message = "New tasks must start in Backlog or To Do."
+        else:
+            allowed_statuses = allowed_status_transitions(
+                current_status,
+                self.project,
+            ) | {current_status}
+            invalid_status_message = (
+                "This status change is not allowed by the project workflow."
+                if workflow_states
+                or (
+                    self.project
+                    and self.project.workflow_transitions.exists()
+                )
+                else (
+                    "This status change is not allowed by the default workflow. "
+                    "Tasks must pass through Review before they can be marked Done."
+                )
+            )
+        self.fields["status"].choices = [
+            (value, label)
+            for value, label in choices
+            if value in allowed_statuses
+        ]
+        self.fields["status"].error_messages["invalid_choice"] = (
+            invalid_status_message
+        )
+        if not self.is_bound:
+            self.fields["status"].initial = (
+                current_status
+                if current_status is not None
+                else (
+                    initial_workflow_status(self.project)
+                    if workflow_states
+                    else Task.Status.TODO
+                )
+            )
 
         if self.project:
             eligible_users = User.objects.filter(
@@ -199,10 +267,29 @@ class TaskForm(forms.ModelForm):
                 )
         return cleaned_data
 
+    def _post_clean(self):
+        status = self.cleaned_data.get("status")
+        if status is None or not workflow_states_for(self.project):
+            super()._post_clean()
+            return
+
+        self.instance.project = self.project
+        set_task_workflow_status(self.instance, status, self.project)
+        self.cleaned_data["status"] = self.instance.status
+        try:
+            super()._post_clean()
+        finally:
+            self.cleaned_data["status"] = status
+
     def save(self, commit=True):
         task = super().save(commit=False)
         if self.project and not getattr(task, "project_id", None):
             task.project = self.project
+        set_task_workflow_status(
+            task,
+            self.cleaned_data["status"],
+            self.project,
+        )
 
         if commit:
             task.save()
@@ -222,6 +309,28 @@ class TaskForm(forms.ModelForm):
 
 class TaskStatusForm(forms.Form):
     status = forms.ChoiceField(choices=Task.Status.choices)
+
+    def __init__(self, *args, current_status, project=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        allowed_statuses = allowed_status_transitions(
+            current_status,
+            project,
+        ) | {current_status}
+        choices = workflow_choices_for(project)
+        self.fields["status"].choices = [
+            (value, label)
+            for value, label in choices
+            if value in allowed_statuses
+        ]
+        self.fields["status"].error_messages["invalid_choice"] = (
+            "This status change is not allowed by the project workflow."
+            if workflow_states_for(project)
+            or (project and project.workflow_transitions.exists())
+            else (
+                "This status change is not allowed by the default workflow. "
+                "Tasks must pass through Review before they can be marked Done."
+            )
+        )
 
 
 class TaskCommentForm(forms.ModelForm):

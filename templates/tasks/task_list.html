@@ -17,14 +17,14 @@
 </section>
 
 {% if tasks %}
-<ul class="projects-list">
+<ul class="projects-list task-list-items">
     {% for task in tasks %}
     <li class="card project-list-card">
         <div class="project-list-heading">
             <h3>
                 <a href="{% url 'tasks:task-detail' task.project_id task.pk %}">{{ task.title }}</a>
             </h3>
-            <span class="status status-neutral">{{ task.get_status_display }}</span>
+            <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' or task.status == 'REVIEW' %}status-warning{% else %}status-neutral{% endif %}">{{ task.get_status_display }}</span>
         </div>
         {% if not selected_project %}
         <p><strong>Project:</strong> {{ task.project.name }}</p>
@@ -33,7 +33,7 @@
             <strong>Assignee:</strong>
             {% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}
         </p>
-        <p><strong>Priority:</strong> {{ task.get_priority_display }}</p>
+        <p><strong>Priority:</strong> <span class="priority-value priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span></p>
         <p>
             <strong>Due date:</strong>
             {% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}

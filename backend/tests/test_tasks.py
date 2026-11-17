@@ -12,9 +12,15 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from projects.models import Project, ProjectMembership
+from projects.models import Project, ProjectMembership, Sprint
 from tasks.forms import TaskForm
-from tasks.models import Task, TaskAttachment, TaskComment, TaskLabel
+from tasks.models import (
+    Task,
+    TaskAttachment,
+    TaskComment,
+    TaskDueReminder,
+    TaskLabel,
+)
 
 User = get_user_model()
 
@@ -370,7 +376,7 @@ class TaskFormTests(TestCase):
                 "estimated_effort": "4.25",
                 "actual_effort": "3.50",
                 "assignee": str(self.member.pk),
-                "status": "IN_PROGRESS",
+                "status": "TODO",
                 "labels": "testing, Quality, Backend",
             },
             project=self.project,
@@ -384,14 +390,36 @@ class TaskFormTests(TestCase):
         self.assertEqual(task.title, "Write unit tests")
         self.assertEqual(task.assignee, self.member)
         self.assertEqual(task.priority, Task.Priority.HIGH)
+        self.assertEqual(task.status, Task.Status.TODO)
         self.assertEqual(task.estimated_effort, Decimal("4.25"))
         self.assertEqual(task.actual_effort, Decimal("3.50"))
-        self.assertEqual(task.status, Task.Status.IN_PROGRESS)
         self.assertEqual(task.labels.count(), 3)
         self.assertEqual(
             set(task.labels.values_list("name", flat=True)),
             {"testing", "quality", "backend"},
         )
+
+    def test_new_tasks_can_only_start_in_backlog_or_to_do(self):
+        form = TaskForm(project=self.project)
+
+        self.assertEqual(
+            list(form.fields["status"].choices),
+            [
+                (Task.Status.BACKLOG, "Backlog"),
+                (Task.Status.TODO, "To Do"),
+            ],
+        )
+
+        invalid_form = TaskForm(
+            data={
+                "title": "Skip workflow stages",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.DONE,
+            },
+            project=self.project,
+        )
+        self.assertFalse(invalid_form.is_valid())
+        self.assertIn("status", invalid_form.errors)
 
     def test_missing_required_title(self):
         form = TaskForm(
@@ -584,7 +612,7 @@ class TaskFormTests(TestCase):
             data={
                 "title": "Initial Task Updated",
                 "priority": "MEDIUM",
-                "status": "DONE",
+                "status": "IN_PROGRESS",
                 "estimated_effort": "8.00",
                 "actual_effort": "10.25",
                 "labels": "v1, hotfix",
@@ -594,13 +622,35 @@ class TaskFormTests(TestCase):
         self.assertTrue(update_form.is_valid())
         updated_task = update_form.save()
 
-        self.assertEqual(updated_task.status, Task.Status.DONE)
+        self.assertEqual(updated_task.status, Task.Status.IN_PROGRESS)
         self.assertEqual(updated_task.estimated_effort, Decimal("8.00"))
         self.assertEqual(updated_task.actual_effort, Decimal("10.25"))
         self.assertEqual(
             set(updated_task.labels.values_list("name", flat=True)),
             {"v1", "hotfix"},
         )
+
+    def test_edit_form_rejects_skipping_required_workflow_stages(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Workflow task",
+            created_by=self.owner,
+            status=Task.Status.TODO,
+        )
+        form = TaskForm(
+            data={
+                "title": task.title,
+                "priority": task.priority,
+                "status": Task.Status.DONE,
+                "assignee": "",
+                "labels": "",
+            },
+            instance=task,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("status", form.errors)
+        self.assertIn("Review", form.errors["status"][0])
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -689,6 +739,67 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
 
+    def test_task_delete_confirmation_does_not_delete_until_post(self):
+        self.client.force_login(self.owner)
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        detail_response = self.client.get(detail_url)
+        self.assertContains(detail_response, delete_url)
+
+        response = self.client.get(delete_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This action cannot be undone.")
+        self.assertContains(response, detail_url)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+
+    def test_authorized_user_can_delete_task_and_task_owned_data(self):
+        comment = TaskComment.objects.create(
+            task=self.task,
+            author=self.owner,
+            content="Task-specific comment",
+        )
+        reminder = TaskDueReminder.objects.create(
+            task=self.task,
+            due_date=date(2026, 11, 5),
+        )
+        label = self.task.labels.get()
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        task_list_url = reverse(
+            "tasks:task-list",
+            kwargs={"project_id": self.project.pk},
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(delete_url)
+
+        self.assertRedirects(response, task_list_url)
+        self.assertFalse(Task.objects.filter(pk=self.task.pk).exists())
+        self.assertFalse(TaskComment.objects.filter(pk=comment.pk).exists())
+        self.assertFalse(TaskDueReminder.objects.filter(pk=reminder.pk).exists())
+        self.assertTrue(TaskLabel.objects.filter(pk=label.pk).exists())
+        self.assertFalse(label.tasks.filter(pk=self.task.pk).exists())
+        self.assertTrue(Project.objects.filter(pk=self.project.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+
+        list_response = self.client.get(task_list_url)
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.assertNotContains(list_response, "First Secure Task")
+        self.assertEqual(self.client.get(detail_url).status_code, 404)
+
     def test_board_groups_tasks_by_defined_status_and_preserves_task_access(self):
         in_progress_task = Task.objects.create(
             project=self.project,
@@ -730,13 +841,21 @@ class TaskViewAndPermissionTests(TestCase):
         response = self.client.get(list_url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["view_mode"], "list")
-        self.assertEqual(response.context["task_columns"], [])
+        self.assertEqual(response.context["view_mode"], "board")
+        self.assertTrue(response.context["task_columns"])
         self.assertContains(response, "First Secure Task")
-        self.assertNotContains(response, "Tasks grouped by status")
+        self.assertContains(response, "Tasks grouped by status")
 
-    def test_task_filters_combine_keyword_assignee_priority_status_and_label(self):
+    def test_task_filters_combine_keyword_assignee_priority_status_label_and_sprint(self):
         matching_label = self.task.labels.get()
+        sprint = Sprint.objects.create(
+            project=self.project,
+            name="Sprint filter",
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 14),
+        )
+        self.task.sprint = sprint
+        self.task.save()
         other_task = Task.objects.create(
             project=self.project,
             title="First Secure Task follow-up",
@@ -762,6 +881,7 @@ class TaskViewAndPermissionTests(TestCase):
                 "priority": Task.Priority.HIGH,
                 "status": Task.Status.TODO,
                 "label": str(matching_label.pk),
+                "sprint": str(sprint.pk),
             },
         )
 
@@ -806,20 +926,22 @@ class TaskViewAndPermissionTests(TestCase):
         self.client.force_login(self.member)
         list_url = reverse("tasks:task-list", kwargs={"project_id": self.project.pk})
 
-        first_page = self.client.get(list_url, {"q": "Paged"})
-        second_page = self.client.get(list_url, {"q": "Paged", "page": "2"})
+        first_page = self.client.get(list_url, {"q": "Paged", "view": "list"})
+        second_page = self.client.get(
+            list_url,
+            {"q": "Paged", "view": "list", "page": "2"},
+        )
 
         self.assertEqual(first_page.context["page_obj"].paginator.count, 21)
         self.assertEqual(len(first_page.context["tasks"]), 20)
-        self.assertContains(first_page, "q=Paged&amp;page=2")
+        self.assertContains(first_page, "q=Paged&amp;view=list&amp;page=2")
         self.assertEqual(len(second_page.context["tasks"]), 1)
 
     def test_task_detail_and_list_display_effort_values(self):
+        self.client.force_login(self.member)
         self.task.estimated_effort = Decimal("4.25")
         self.task.actual_effort = Decimal("5.50")
         self.task.save()
-        self.client.force_login(self.member)
-
         detail_response = self.client.get(
             reverse(
                 "tasks:task-detail",
@@ -834,6 +956,23 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(detail_response, "5.50 hours")
         self.assertContains(list_response, "4.25h")
         self.assertContains(list_response, "5.50h")
+
+    def test_task_delete_action_is_only_shown_to_project_managers(self):
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.client.force_login(self.member)
+
+        member_response = self.client.get(detail_url)
+
+        self.assertContains(member_response, "Edit task")
+        self.assertNotContains(member_response, "Delete task")
+
+        self.client.force_login(self.owner)
+        manager_response = self.client.get(detail_url)
+
+        self.assertEqual(manager_response.content.count(b">Delete task</a>"), 1)
 
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")
@@ -866,19 +1005,32 @@ class TaskViewAndPermissionTests(TestCase):
             {"audit", "core"},
         )
 
-    def test_non_manager_cannot_create_task(self):
+    def test_project_member_can_create_task(self):
         self.client.login(email="member@example.com", password="password123")
         create_url = reverse("tasks:task-create", kwargs={"project_id": self.project.pk})
 
         response = self.client.post(
             create_url,
             data={
-                "title": "Unauthorized Task",
+                "title": "Member-created Task",
                 "priority": "LOW",
                 "status": "TODO",
             },
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
+        task = Task.objects.get(title="Member-created Task")
+        self.assertEqual(task.created_by, self.member)
+
+    def test_outsider_cannot_create_task(self):
+        self.client.force_login(self.outsider)
+
+        response = self.client.post(
+            reverse("tasks:task-create", kwargs={"project_id": self.project.pk}),
+            {"title": "Outsider task", "priority": "LOW", "status": "TODO"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(Task.objects.filter(title="Outsider task").exists())
 
     def test_create_rejects_outsider_assignee_without_persisting_task(self):
         self.client.force_login(self.owner)

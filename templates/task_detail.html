@@ -25,7 +25,7 @@
 
 <article class="card">
     <div class="task-detail-meta">
-        <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
+        <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' or task.status == 'REVIEW' %}status-warning{% else %}status-neutral{% endif %}">
             {{ task.get_status_display }}
         </span>
         <span class="status {% if task.priority == 'CRITICAL' or task.priority == 'HIGH' %}status-danger{% elif task.priority == 'MEDIUM' %}status-warning{% else %}status-neutral{% endif %}">
@@ -82,6 +82,25 @@
         </div>
     </div>
 </article>
+
+<section class="task-activity" aria-labelledby="task-activity-heading">
+    <h2 id="task-activity-heading">Task activity</h2>
+    {% if activity %}
+    <ol class="task-comments">
+        {% for entry in activity %}
+        <li class="card task-comment">
+            <div class="task-comment-meta">
+                <strong>{{ entry.actor.full_name|default:entry.actor_name|default:"Unknown user" }}</strong>
+                <time datetime="{{ entry.timestamp|date:'c' }}">{{ entry.timestamp|date:"M j, Y H:i" }}</time>
+            </div>
+            <p>{{ entry.description }}</p>
+        </li>
+        {% endfor %}
+    </ol>
+    {% else %}
+    <p class="task-collaboration-empty">No activity recorded yet.</p>
+    {% endif %}
+</section>
 
 {% if can_update_status %}
 <section class="card project-form" aria-labelledby="update-task-status-heading">

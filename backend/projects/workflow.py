@@ -10,28 +10,47 @@ DEFAULT_WORKFLOW_TRANSITIONS = {
 STATUS_CHOICES = ["TODO", "IN_PROGRESS", "DONE"]
 
 
+def _legacy_status(status):
+    return "IN_REVIEW" if status == "REVIEW" else status
+
+
+def _task_status(status):
+    return "REVIEW" if status == "IN_REVIEW" else status
+
+
 def get_default_transitions_map():
     return {k: list(v) for k, v in DEFAULT_WORKFLOW_TRANSITIONS.items()}
 
 
 def get_allowed_transitions(project, current_status):
     """Returns the list of valid next statuses for a given task status in the project."""
+    current_status = _legacy_status(current_status)
     if not project:
-        return DEFAULT_WORKFLOW_TRANSITIONS.get(current_status, [])
+        return [
+            _task_status(status)
+            for status in DEFAULT_WORKFLOW_TRANSITIONS.get(current_status, [])
+        ]
 
-    transitions = project.workflow_transitions.filter(from_status=current_status)
-    if transitions.exists():
-        allowed = list(
-            transitions.filter(is_allowed=True).values_list("to_status", flat=True)
-        )
-        return allowed
+    if project.workflow_transitions.exists():
+        allowed_statuses = project.workflow_transitions.filter(
+            from_status=current_status,
+            is_allowed=True,
+        ).values_list("to_status", flat=True)
+        return [_task_status(status) for status in allowed_statuses]
 
-    return DEFAULT_WORKFLOW_TRANSITIONS.get(current_status, [])
+    return [
+        _task_status(status)
+        for status in DEFAULT_WORKFLOW_TRANSITIONS.get(current_status, [])
+    ]
 
 
 def is_valid_transition(project, from_status, to_status, user=None):
     """Validates whether transitioning from from_status to to_status is allowed."""
+    from_status = _legacy_status(from_status)
+    to_status = _legacy_status(to_status)
     if from_status == to_status:
+        return True
+    if from_status == "BACKLOG" and to_status == "TODO":
         return True
 
     # If project has custom workflow transitions configured, enforce them strictly

@@ -276,6 +276,31 @@ class AuditLogTests(TestCase):
         )
         self.assertEqual(list(response.context["activity"]), [newer, older])
 
+    def test_task_detail_displays_activity_in_chronological_order(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Task history",
+            created_by=self.owner,
+        )
+        from tasks.audit import record_audit
+
+        older = record_audit(self.owner, AuditLog.Action.CREATE, task)
+        newer = record_audit(
+            self.member,
+            AuditLog.Action.UPDATE,
+            task,
+            changes={"title": {"from": "Task history", "to": "Updated history"}},
+        )
+
+        response = self.client.get(
+            reverse("tasks:task-detail", args=[self.project.pk, task.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(list(response.context["activity"]), [older, newer])
+        self.assertContains(response, "Task activity")
+        self.assertContains(response, "Changed: title.")
+
     def test_activity_requires_project_access_and_login(self):
         self.client.logout()
         response = self.client.get(

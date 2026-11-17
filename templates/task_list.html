@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Tasks - {{ project.name }} | PMS{% endblock %}
 
@@ -9,15 +10,15 @@
 {% block content %}
 <section class="projects-intro" aria-labelledby="tasks-list-heading">
     <div>
-        <h2 id="tasks-list-heading">Tasks</h2>
-        <p>Review and track tasks for <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a>.</p>
+        <h2 id="tasks-list-heading">{% if view_mode == 'board' %}Kanban board{% else %}Tasks{% endif %}</h2>
+        <p>Track tasks for <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a>.</p>
     </div>
     <div class="project-form-actions">
         <nav class="task-view-toggle" aria-label="Task view">
-            <a class="button{% if view_mode == 'board' %} button-secondary{% endif %}"
-                href="{% url 'tasks:task-list' project.pk %}{% if filter_query %}?{{ filter_query }}{% endif %}"
+            <a class="button{% if view_mode == 'list' %} button-secondary{% endif %}"
+                href="{% url 'tasks:task-list' project.pk %}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=list"
                 {% if view_mode == 'list' %}aria-current="page"{% endif %}>List</a>
-            <a class="button{% if view_mode != 'board' %} button-secondary{% endif %}"
+            <a class="button{% if view_mode == 'board' %} button-secondary{% endif %}"
                 href="{% url 'tasks:task-list' project.pk %}?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=board"
                 {% if view_mode == 'board' %}aria-current="page"{% endif %}>Board</a>
         </nav>
@@ -29,7 +30,7 @@
 </section>
 
 <form class="card search-filter-form" method="get">
-    {% if view_mode == 'board' %}<input type="hidden" name="view" value="board">{% endif %}
+    <input type="hidden" name="view" value="{{ view_mode }}">
     {% for field in filter_form %}
     <div class="form-field">
         <label for="{{ field.id_for_label }}">{{ field.label }}</label>
@@ -41,31 +42,48 @@
     {% endfor %}
     <div class="search-filter-actions">
         <button type="submit">Apply filters</button>
-        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}{% if view_mode == 'board' %}?view=board{% endif %}">
+        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}?view={{ view_mode }}">
             Clear filters
         </a>
     </div>
 </form>
 
 {% if view_mode == 'board' %}
-<div class="task-board" aria-label="Tasks grouped by status">
-    {% for column in task_columns %}
-    <section class="task-board-column" aria-labelledby="task-status-{{ forloop.counter }}">
-        <header class="task-board-column-heading">
-            <h3 id="task-status-{{ forloop.counter }}">{{ column.label }}</h3>
-            <span class="task-board-count">{{ column.tasks|length }}</span>
+<p class="task-board-feedback" data-task-board-feedback role="status" aria-live="polite" hidden></p>
+<div class="kanban-board task-board" data-kanban-board data-task-board aria-label="Tasks grouped by status">
+    {% for column in board_columns %}
+    <section class="kanban-column task-board-column"
+        id="task-status-{{ column.value }}"
+        data-kanban-column="{{ column.value }}"
+        data-status-column="{{ column.value }}"
+        aria-labelledby="kanban-heading-{{ column.value }}">
+        <header class="kanban-column-header">
+            <h2 id="kanban-heading-{{ column.value }}">{{ column.label }}</h2>
+            <span class="kanban-column-count task-board-count" data-task-board-count>{{ column.tasks|length }}</span>
         </header>
-        {% if column.tasks %}
-        <ul class="task-board-cards">
+        <div class="kanban-column-cards task-board-cards" data-task-board-cards>
             {% for task in column.tasks %}
-            <li class="card task-board-card">
-                <h4><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h4>
-                <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
-                <div class="task-board-meta">
-                    <span>Priority: <strong>{{ task.get_priority_display }}</strong></span>
-                    <span>Assignee: <strong>{% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}</strong></span>
-                    <span>Due: <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
+            <article class="kanban-card task-board-card{% if task.can_move and task.allowed_status_choices %} kanban-card-movable{% endif %}"
+                data-kanban-card
+                data-task-card
+                data-task-id="{{ task.pk }}"
+                data-task-status="{{ task.board_status_key }}"
+                draggable="{% if task.can_move and task.allowed_status_choices %}true{% else %}false{% endif %}">
+                <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
+                <div class="kanban-card-badges">
+                    <span class="priority-value priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span>
+                    <span class="kanban-assignee">
+                        {% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}
+                    </span>
                 </div>
+                <p class="kanban-card-due">
+                    <span>Due</span>
+                    <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong>
+                </p>
+                <p class="task-board-effort">
+                    Estimate: {% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %};
+                    Actual: {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}
+                </p>
                 {% if task.labels.all %}
                 <div class="task-labels-list">
                     {% for label in task.labels.all %}
@@ -73,15 +91,27 @@
                     {% endfor %}
                 </div>
                 {% endif %}
-            </li>
+                {% if task.can_update_status %}
+                <form class="kanban-move-form task-board-status-form" method="post"
+                    action="{% url 'tasks:task-update-status' project.pk task.pk %}"
+                    data-task-status-form>
+                    {% csrf_token %}
+                    <div class="form-field">
+                        <label for="{{ task.status_form.status.id_for_label }}">Move {{ task.title }} to</label>
+                        {{ task.status_form.status }}
+                    </div>
+                    <button type="submit">Save status</button>
+                </form>
+                {% endif %}
+            </article>
+            {% empty %}
+            <p class="kanban-column-empty task-board-empty">No tasks in this status.</p>
             {% endfor %}
-        </ul>
-        {% else %}
-        <p class="task-board-empty">No tasks in this status.</p>
-        {% endif %}
+        </div>
     </section>
     {% endfor %}
 </div>
+<p class="visually-hidden" data-kanban-announcement aria-live="polite"></p>
 {% else %}
 {% if tasks %}
 <ul class="projects-list">
@@ -90,7 +120,7 @@
         <div class="project-list-heading">
             <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
             <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
-                {{ task.get_status_display }}
+                {% if task.workflow_state_id %}{{ task.workflow_state.name }}{% else %}{{ task.get_status_display }}{% endif %}
             </span>
         </div>
         <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
@@ -101,6 +131,7 @@
             <span><span class="task-meta-label">Estimate</span><strong>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
             <span><span class="task-meta-label">Actual</span><strong>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
             <span><span class="task-meta-label">Sprint</span><strong>{% if task.sprint %}{{ task.sprint.name }}{% else %}Backlog{% endif %}</strong></span>
+            <span><span class="task-meta-label">Milestone</span><strong>{% if task.milestone %}{{ task.milestone.name }}{% else %}Not set{% endif %}</strong></span>
         </div>
         {% if task.labels.all %}
         <div class="task-labels-list">
@@ -113,27 +144,26 @@
     {% endfor %}
 </ul>
 {% else %}
-<div class="card projects-empty-state">
-    <h3>No tasks yet</h3>
-    <p>This project does not have any tasks yet.</p>
-    {% if can_create_task %}
-    <div class="pending-action" style="margin-top: 1rem;">
-        <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create first task</a>
-    </div>
-    {% endif %}
-</div>
+<p class="empty-state">No tasks match these filters.</p>
 {% endif %}
 {% endif %}
 
 {% if page_obj and page_obj.has_other_pages %}
 <nav class="pagination-nav" aria-label="Task pages">
     {% if page_obj.has_previous %}
-    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=list&amp;page={{ page_obj.previous_page_number }}">Previous</a>
     {% endif %}
     <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
     {% if page_obj.has_next %}
-    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+    <a class="button button-secondary" href="?{% if filter_query %}{{ filter_query }}&amp;{% endif %}view=list&amp;page={{ page_obj.next_page_number }}">Next</a>
     {% endif %}
 </nav>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if view_mode == 'board' %}
+<script src="{% static 'js/task_board.js' %}" defer></script>
+<script src="{% static 'js/kanban.js' %}" defer></script>
 {% endif %}
 {% endblock %}

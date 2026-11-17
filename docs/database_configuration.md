@@ -1,7 +1,7 @@
 # Production Database Configuration Guide
 
 ## Overview
-The application supports multi-dialect database configuration via standard environment variables. By default, SQLite is utilized for zero-configuration local development. For production deployments, PostgreSQL or MySQL can be targeted without modifying application source code.
+The application supports multi-dialect database configuration via standard environment variables. By default, SQLite is used for zero-configuration local development. Production deployments must use PostgreSQL or MySQL; SQLite is not selected as the production fallback when `DJANGO_DEBUG=false`.
 
 ---
 
@@ -16,6 +16,11 @@ The application supports multi-dialect database configuration via standard envir
 | `DJANGO_DB_HOST` | Database host or socket | `localhost` | `db.production.internal` |
 | `DJANGO_DB_PORT` | Port number | `""` | `5432` |
 | `DJANGO_DB_CONN_MAX_AGE` | Connection pooling duration in seconds | `600` | `600` |
+| `DATABASE_URL` | Full database connection URL; takes precedence over the dialect variables | unset | `postgresql://user:password@host:5432/database` |
+
+When `DATABASE_URL` is unset, `DJANGO_DB_ENGINE=postgresql` or `mysql` selects the corresponding
+backend and uses the `DJANGO_DB_*` connection variables. Production startup fails if neither a
+database URL nor a PostgreSQL/MySQL engine is configured.
 
 ---
 

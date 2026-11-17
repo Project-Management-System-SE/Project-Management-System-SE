@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -93,8 +93,17 @@ class DashboardViewTests(TestCase):
         self.assertEqual(active_summary.completed_task_count, 1)
         self.assertEqual(active_summary.completion_percentage, 33)
         self.assertEqual(
-            [status["count"] for status in active_summary.status_breakdown],
-            [1, 1, 1],
+            {
+                status["value"]: status["count"]
+                for status in active_summary.status_breakdown
+            },
+            {
+                Task.Status.BACKLOG: 0,
+                Task.Status.TODO: 1,
+                Task.Status.IN_PROGRESS: 1,
+                Task.Status.REVIEW: 0,
+                Task.Status.DONE: 1,
+            },
         )
         planned_summary = next(
             project for project in response.context["projects"] if project == planned_project
@@ -229,6 +238,61 @@ class DashboardViewTests(TestCase):
             updated.context["assignee_distribution"][0]["task_count"],
             1,
         )
+
+    def test_dashboard_renders_selected_sprint_analytics_and_velocity_history(self):
+        today = date.today()
+        active_sprint = Sprint.objects.create(
+            project=Project.objects.create(name="Charts project", owner=self.owner),
+            name="Active charts",
+            start_date=today - timedelta(days=3),
+            end_date=today + timedelta(days=7),
+            status=Sprint.Status.ACTIVE,
+        )
+        completed_sprint = Sprint.objects.create(
+            project=active_sprint.project,
+            name="Finished charts",
+            start_date=today - timedelta(days=20),
+            end_date=today - timedelta(days=10),
+            status=Sprint.Status.COMPLETED,
+        )
+        Task.objects.create(
+            project=active_sprint.project,
+            sprint=active_sprint,
+            title="Active estimate",
+            created_by=self.owner,
+            estimated_effort=Decimal("3.00"),
+        )
+        Task.objects.create(
+            project=active_sprint.project,
+            sprint=completed_sprint,
+            title="Completed estimate",
+            created_by=self.owner,
+            status=Task.Status.DONE,
+            estimated_effort=Decimal("5.00"),
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.get(reverse("projects:dashboard"))
+
+        project_summary = next(
+            project
+            for project in response.context["projects"]
+            if project.pk == active_sprint.project_id
+        )
+        analytics = next(
+            item
+            for item in response.context["sprint_analytics"]
+            if item["project"].pk == active_sprint.project_id
+        )
+        self.assertEqual(analytics["selected_sprint"], active_sprint)
+        self.assertEqual(
+            analytics["completed_sprints"][0]["velocity"],
+            Decimal("5.00"),
+        )
+        self.assertContains(response, "Sprint Analytics", count=1)
+        self.assertNotContains(response, "Burndown · Active charts")
+        self.assertContains(response, "Completed sprint comparison")
+        self.assertContains(response, "Finished charts")
 
     def test_dashboard_excludes_tasks_from_hidden_projects(self):
         visible_project = Project.objects.create(name="Visible", owner=self.owner)
@@ -638,7 +702,7 @@ class ProjectViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(list(response.context["projects"]), [])
-        self.assertContains(response, "No projects yet")
+        self.assertContains(response, "No matching projects")
         self.assertContains(response, "Clear")
 
     def test_project_list_paginates_filtered_results_and_preserves_search(self):
@@ -659,6 +723,37 @@ class ProjectViewTests(TestCase):
         self.assertEqual(len(first_page.context["projects"]), 20)
         self.assertContains(first_page, "q=Paged&amp;page=2")
         self.assertEqual(len(second_page.context["projects"]), 1)
+
+    def test_project_list_search_and_status_filters_can_be_combined(self):
+        matching_project = Project.objects.create(
+            name="Release planning",
+            description="Prepare for launch",
+            owner=self.owner,
+            status=Project.Status.ACTIVE,
+        )
+        Project.objects.create(
+            name="Release archive",
+            description="Old release work",
+            owner=self.owner,
+            status=Project.Status.ARCHIVED,
+        )
+        Project.objects.create(
+            name="Infrastructure",
+            description="Deployment systems",
+            owner=self.owner,
+            status=Project.Status.ACTIVE,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "release", "status": Project.Status.ACTIVE},
+        )
+
+        self.assertEqual(list(response.context["projects"]), [matching_project])
+        self.assertEqual(response.context["search_query"], "release")
+        self.assertEqual(response.context["selected_status"], Project.Status.ACTIVE)
+        self.assertContains(response, "Clear")
 
     def test_project_form_supplies_template_fields(self):
         self.client.force_login(self.admin)

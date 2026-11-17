@@ -6,11 +6,17 @@ The REST API provides programmatic access to projects, tasks, workflow transitio
 ---
 
 ## Authentication
-API requests must authenticate using standard Bearer Token headers:
+The token API accepts standard Bearer or Token headers. Valid tokens are required for
+state-changing requests:
 ```bash
-curl -X GET https://example.com/api/v1/projects/ \
-     -H "Authorization: Bearer <your_api_token>"
+curl -X POST https://example.com/api/v1/projects/42/tasks/ \
+     -H "Authorization: Bearer <your_api_token>" \
+     -H "Content-Type: application/json" \
+     -d '{"title": "New task"}'
 ```
+Authenticated Django sessions may use its safe `GET` endpoints. For session-authenticated
+project/task reads and writes, use `/api/v1/session/`; its unsafe requests require Django's
+normal CSRF token. Both APIs enforce project visibility and task permissions.
 
 ---
 

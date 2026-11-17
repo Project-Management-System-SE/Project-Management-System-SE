@@ -54,7 +54,8 @@ Project-Management-System/
 ├── static/                 # Static assets: CSS, JavaScript, and images
 └── .github/
     └── workflows/
-        └── tests.yml       # GitHub Actions automated test workflow
+        ├── tests.yml         # GitHub Actions automated test workflow
+        └── deploy-render.yml # Gated Render deployment workflow
 ```
 
 ---
@@ -191,8 +192,10 @@ issue #19 owner before changing collaboration permissions.
 Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
 tasks in projects they can access. Project Admins and Project Managers can update any task
 status; an authorized project member can update a task assigned to them or created by them.
-Supported statuses are **To Do**, **In Progress**, and **Done**. Task details also support
-creation, editing, and project-scoped labels.
+The project task page displays a Kanban board with **Backlog**, **To Do**, **In Progress**,
+**Review**, and **Done** columns. Tasks can move one stage at a time; a task must pass through
+Review before it can be marked Done. Task details also support creation, editing, deletion, and
+project-scoped labels.
 
 Invalid status values are rejected without changing the saved task. Run
 `python backend/manage.py migrate` after pulling changes to apply database migrations.
@@ -208,7 +211,6 @@ task is due. Registration confirmation and password-reset messages continue to u
 Run `python backend/manage.py send_due_date_reminders` daily to create due-date reminders. Schedule
 this command with Windows Task Scheduler or a deployment scheduler; the command records sent
 reminders so repeated runs do not create duplicates.
-
 
 ---
 
@@ -246,3 +248,112 @@ reminders so repeated runs do not create duplicates.
 - Automated security audit command: `python backend/manage.py verify_production_security`.
 - Production environment template: `.env.example`.
 - Detailed documentation: [Production Security](docs/production_security.md).
+
+### Dashboards and reports
+
+The dashboard provides per-project sprint selection, a burndown when saved completion timestamps
+provide enough history, and a comparison of completed-sprint velocity. Burndown history is limited:
+the database does not retain daily status, estimate, or sprint-assignment snapshots, so reopened tasks
+and historical changes cannot be reconstructed. Velocity is the estimated effort of DONE tasks in a
+completed sprint; a complete figure is unavailable when any completed task lacks an estimate.
+Actual logged effort is reported separately and is not used as velocity.
+
+Project members can download **Progress summary**, **Sprint velocity**, and **Team workload** CSV
+files from a project's details page. CSV exports are scoped to projects the signed-in user can view.
+Spreadsheet-formula prefixes in user-provided text are escaped in exports.
+
+### REST APIs
+
+The versioned API provides a token-authenticated interface at `/api/v1/` and a session-authenticated
+interface at `/api/v1/session/`. Token-authenticated writes require a per-user API token in the
+`Authorization: Bearer <token>` or `Authorization: Token <token>` header. Session API writes require
+the normal Django CSRF token. Anonymous requests receive JSON `401` responses, and project data is
+limited to projects visible to the authenticated user. Task writes use the applicable project
+permissions and workflow validation. The session API also records notifications and audit history.
+Task lists accept the web filters (`q`, `assignee`, `priority`, `status`, `label`, and `sprint`) and
+are paginated with `page` (default `1`) and `page_size` (default `100`, maximum `100`).
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/session/projects/` | List visible projects |
+| `GET` | `/api/v1/session/projects/{project_id}/` | Read a visible project |
+| `GET` | `/api/v1/session/projects/{project_id}/tasks/` | Search and filter project tasks |
+| `POST` | `/api/v1/session/projects/{project_id}/tasks/` | Create a task as a project member |
+| `GET` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Read a visible task |
+| `PATCH` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Update a task you may edit |
+| `DELETE` | `/api/v1/session/projects/{project_id}/tasks/{task_id}/` | Delete a task as a project manager |
+
+Task create/update bodies are JSON objects. Supported fields are `title`, `description`, `priority`,
+`due_date`, `estimated_effort`, `actual_effort`, `assignee`, `sprint`, `milestone`, `status`, and
+`labels` (an array of strings); user and planning relations use their numeric IDs. Task status changes
+must follow the project's workflow. For example:
+
+```json
+{
+  "title": "Review API integration",
+  "priority": "HIGH",
+  "assignee": 12,
+  "estimated_effort": "2.50",
+  "labels": ["integration", "backend"]
+}
+```
+
+The token API also exposes sprint, milestone, and task-status endpoints, and provides an OpenAPI 3.0
+viewer at `/api/v1/docs/`. The project does not include bundled Slack or GitHub connectors.
+
+### HTTPS and backups
+
+For deployments, set `DJANGO_DEBUG=false`, a strong `DJANGO_SECRET_KEY`, and `DJANGO_ALLOWED_HOSTS`.
+With debug disabled, HTTPS redirects and secure session/CSRF cookies are enabled by default; override
+them only when the deployment topology requires it. If TLS terminates at a reverse proxy, set
+`DJANGO_TRUST_X_FORWARDED_PROTO=true` only when that proxy removes any client-supplied
+`X-Forwarded-Proto` header and writes its own. Enable HSTS with `DJANGO_SECURE_HSTS_SECONDS` only
+after confirming HTTPS is permanent for the deployment domain.
+
+Create a compressed database and uploaded-media backup with:
+
+```powershell
+python backend\manage.py backup_database
+```
+
+By default, archives are written to `backend\backups`; set `DJANGO_BACKUP_DIR` or pass `--output-dir`
+to select protected storage outside the web root and repository. Schedule this command daily using
+Windows Task Scheduler or the deployment scheduler, and periodically test restore procedures. Each
+archive contains a Django `database.json` fixture, a manifest, and files from `DJANGO_MEDIA_ROOT`.
+To restore, load the fixture with `python backend\manage.py loaddata <database.json>` and restore the
+archive's `media` files to `DJANGO_MEDIA_ROOT`. On a fresh database, apply migrations before loading
+the fixture. Backups contain personal data and password hashes; restrict access and encrypt them at
+rest.
+
+### Render deployment
+
+The application supports Render PostgreSQL through `DATABASE_URL`, serves collected static assets
+with WhiteNoise, and exposes `/health/` as a database-aware health check. Set the Render web
+service's **Root Directory** to `backend` and configure:
+
+- **Build command:** `python -m pip install -r requirements.txt && python manage.py collectstatic --noinput`
+- **Start command:** `python manage.py migrate --noinput && python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`
+- **Health check path:** `/health/`
+
+`backend/requirements.txt` installs Gunicorn, Psycopg, `dj-database-url`, and WhiteNoise. The
+`python -m gunicorn` invocation uses the same Python environment that installed the dependencies.
+Attach a Render PostgreSQL database and set `DATABASE_URL` to its internal connection string.
+Set `DATABASE_URL` or configure `DJANGO_DB_ENGINE` as PostgreSQL or MySQL when
+`DJANGO_DEBUG=false`; startup fails rather than falling back to SQLite. Also configure
+`DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`,
+`DJANGO_ALLOWED_HOSTS`, and `DJANGO_TRUST_X_FORWARDED_PROTO=true`. Production enables HTTPS
+redirect, secure cookies, and one-year HSTS by default; only reduce `DJANGO_SECURE_HSTS_SECONDS`
+if HTTPS is not permanently available. Leave HSTS subdomain and preload options disabled unless
+every affected hostname is HTTPS-only and you intentionally want the browser-preload commitment.
+Set `DJANGO_MEDIA_ROOT=/var/data/media` and attach persistent storage mounted at `/var/data`, or
+configure durable object storage; Render's service filesystem is ephemeral and task attachments
+would otherwise be lost on redeploy. Configure the SMTP environment variables above for
+registration and password-reset email.
+
+The **Render CD** workflow is gated on successful CI for a push to `main`. To require manual approval,
+create a GitHub environment named `production`, add required reviewers to its protection rules, and
+save the Render service's deploy-hook URL as the environment secret `RENDER_DEPLOY_HOOK_URL`. The
+workflow then waits for approval before asking Render to deploy. Create the Render service and
+database, configure its persistent media storage and environment variables, and connect it to the
+`main` branch before enabling this workflow. Creating these external resources may incur provider
+charges; confirm the selected plans in Render before provisioning them.

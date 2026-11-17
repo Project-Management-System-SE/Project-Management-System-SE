@@ -72,7 +72,7 @@ class TaskPermissionsTests(TestCase):
     def test_create_task_permissions(self):
         self.assertTrue(can_create_task_in(self.owner, self.project))
         self.assertTrue(can_create_task_in(self.pm, self.project))
-        self.assertFalse(can_create_task_in(self.member, self.project))
+        self.assertTrue(can_create_task_in(self.member, self.project))
         self.assertFalse(can_create_task_in(self.outsider, self.project))
 
     def test_edit_task_permissions(self):

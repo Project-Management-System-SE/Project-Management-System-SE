@@ -1,5 +1,6 @@
 from django.urls import path
 
+from . import reports
 from . import views
 
 app_name = "projects"
@@ -31,6 +32,21 @@ urlpatterns = [
         "projects/<int:project_id>/activity/",
         views.project_activity,
         name="project-activity",
+    ),
+    path(
+        "projects/<int:project_id>/reports/progress.csv",
+        reports.project_progress_report,
+        name="project-progress-report",
+    ),
+    path(
+        "projects/<int:project_id>/reports/velocity.csv",
+        reports.project_velocity_report,
+        name="project-velocity-report",
+    ),
+    path(
+        "projects/<int:project_id>/reports/workload.csv",
+        reports.project_workload_report,
+        name="project-workload-report",
     ),
     path(
         "projects/<int:project_id>/planning/",

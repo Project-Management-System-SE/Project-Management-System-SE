@@ -59,6 +59,19 @@ class RestApiTests(TestCase):
         self.assertEqual(resp.status_code, 201)
         self.assertEqual(resp.json()["data"]["title"], "Created via API")
 
+    def test_session_authentication_cannot_bypass_csrf_on_token_api_writes(self):
+        self.client.force_login(self.user)
+        url = reverse("api:project-tasks", kwargs={"project_id": self.project.pk})
+
+        response = self.client.post(
+            url,
+            data=json.dumps({"title": "Session-authenticated write"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Task.objects.filter(title="Session-authenticated write").exists())
+
     def test_task_status_transition_enforced(self):
         status_url = reverse("api:task-status", kwargs={"task_id": self.task.pk})
         # Invalid jump from TODO -> DONE
