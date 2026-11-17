@@ -12,7 +12,7 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from projects.models import Project, ProjectMembership
+from projects.models import Project, ProjectMembership, Sprint
 from tasks.forms import TaskForm
 from tasks.models import (
     Task,
@@ -846,8 +846,16 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "First Secure Task")
         self.assertContains(response, "Tasks grouped by status")
 
-    def test_task_filters_combine_keyword_assignee_priority_status_and_label(self):
+    def test_task_filters_combine_keyword_assignee_priority_status_label_and_sprint(self):
         matching_label = self.task.labels.get()
+        sprint = Sprint.objects.create(
+            project=self.project,
+            name="Sprint filter",
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 14),
+        )
+        self.task.sprint = sprint
+        self.task.save()
         other_task = Task.objects.create(
             project=self.project,
             title="First Secure Task follow-up",
@@ -873,6 +881,7 @@ class TaskViewAndPermissionTests(TestCase):
                 "priority": Task.Priority.HIGH,
                 "status": Task.Status.TODO,
                 "label": str(matching_label.pk),
+                "sprint": str(sprint.pk),
             },
         )
 

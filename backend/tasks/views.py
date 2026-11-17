@@ -190,6 +190,8 @@ def task_list(request, project_id):
                 tasks = tasks.filter(status=filters["status"])
         if filters["label"]:
             tasks = tasks.filter(labels=filters["label"])
+        if filters["sprint"]:
+            tasks = tasks.filter(sprint=filters["sprint"])
     else:
         tasks = tasks.none()
 

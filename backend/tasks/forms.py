@@ -48,6 +48,11 @@ class TaskFilterForm(forms.Form):
         required=False,
         empty_label="All labels",
     )
+    sprint = forms.ModelChoiceField(
+        queryset=Sprint.objects.none(),
+        required=False,
+        empty_label="All sprints",
+    )
 
     def __init__(self, *args, project, **kwargs):
         super().__init__(*args, **kwargs)
@@ -59,6 +64,9 @@ class TaskFilterForm(forms.Form):
             .order_by("full_name", "email")
         )
         self.fields["label"].queryset = project.labels.order_by("name")
+        self.fields["sprint"].queryset = project.sprints.order_by(
+            "-start_date", "-pk"
+        )
 
 
 class TaskForm(forms.ModelForm):
