@@ -12,6 +12,11 @@ urlpatterns = [
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", account_views.register, name="register"),
     path(
+        "accounts/confirm/<uidb64>/<token>/",
+        account_views.confirm_email,
+        name="email-confirm",
+    ),
+    path(
         "accounts/password-reset/",
         account_views.PasswordResetView.as_view(),
         name="password_reset",

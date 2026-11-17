@@ -15,6 +15,7 @@
     <div class="project-form-actions">
         {% if can_edit_task %}
         <a class="button" href="{% url 'tasks:task-update' project.pk task.pk %}">Edit task</a>
+        <a class="button button-secondary" href="{% url 'tasks:task-delete' project.pk task.pk %}">Delete task</a>
         {% endif %}
         <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}">Back to task list</a>
     </div>
@@ -22,7 +23,7 @@
 
 <article class="card">
     <div class="task-detail-meta">
-        <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
+        <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' or task.status == 'REVIEW' %}status-warning{% else %}status-neutral{% endif %}">
             {{ task.get_status_display }}
         </span>
         <span class="status {% if task.priority == 'CRITICAL' or task.priority == 'HIGH' %}status-danger{% elif task.priority == 'MEDIUM' %}status-warning{% else %}status-neutral{% endif %}">

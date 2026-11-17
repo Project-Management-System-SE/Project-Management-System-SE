@@ -2,31 +2,70 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
-from projects.permissions import visible_projects_for
+from projects.permissions import can_manage_project, visible_projects_for
 
 from .forms import TaskCommentForm, TaskForm, TaskStatusForm
-from .models import Task, TaskComment, UserNotification
+from .models import (
+    Task,
+    UserNotification,
+    WorkflowState,
+    WorkflowTransition,
+)
 from .notifications import (
     notify_task_assignment,
     notify_task_comment,
     notify_task_status_change,
 )
 from .permissions import can_create_task_in, can_edit_task
+from .workflow import (
+    allowed_status_transitions,
+    set_task_workflow_status,
+    task_status_for_workflow_state,
+    workflow_choices_for,
+    workflow_status_key,
+)
+from .workflow_forms import WorkflowConfigurationForm
 
 
 @login_required
 def task_list(request, project_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
-    tasks = (
+    tasks = list(
         project.tasks.select_related("assignee", "created_by")
+        .select_related("workflow_state")
         .prefetch_related("labels")
         .order_by("-created_at")
     )
+    can_manage_all_tasks = can_manage_project(request.user, project)
+    board_choices = workflow_choices_for(project)
+    columns = [
+        {"value": value, "label": label, "tasks": []}
+        for value, label in board_choices
+    ]
+    columns_by_status = {column["value"]: column for column in columns}
+    for task in tasks:
+        task.can_move = can_manage_all_tasks or (
+            task.assignee_id == request.user.pk
+            or task.created_by_id == request.user.pk
+        )
+        task.allowed_status_choices = [
+            (value, label)
+            for value, label in board_choices
+            if value
+            in allowed_status_transitions(workflow_status_key(task), project)
+        ]
+        current_status = workflow_status_key(task)
+        if current_status not in columns_by_status:
+            raise RuntimeError(
+                f"Task {task.pk} has a status missing from project {project.pk}'s workflow."
+            )
+        columns_by_status[current_status]["tasks"].append(task)
 
     return render(
         request,
@@ -34,6 +73,7 @@ def task_list(request, project_id):
         {
             "project": project,
             "tasks": tasks,
+            "board_columns": columns,
             "can_create_task": can_create_task_in(request.user, project),
         },
     )
@@ -44,7 +84,7 @@ def all_task_list(request):
     projects = visible_projects_for(request.user)
     tasks = (
         Task.objects.filter(project__in=projects)
-        .select_related("project", "assignee", "created_by")
+        .select_related("project", "assignee", "created_by", "workflow_state")
         .prefetch_related("labels")
     )
     return render(request, "tasks/task_list.html", {"tasks": tasks})
@@ -96,7 +136,12 @@ def task_create(request, project_id):
 def task_detail(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(
-        project.tasks.select_related("assignee", "created_by", "project").prefetch_related("labels"),
+        project.tasks.select_related(
+            "assignee",
+            "created_by",
+            "project",
+            "workflow_state",
+        ).prefetch_related("labels"),
         pk=task_id,
     )
     can_edit = can_edit_task(request.user, task)
@@ -109,7 +154,11 @@ def task_detail(request, project_id, task_id):
             "task": task,
             "can_edit_task": can_edit,
             "can_update_status": can_edit,
-            "status_form": TaskStatusForm(initial={"status": task.status}),
+            "status_form": TaskStatusForm(
+                current_status=workflow_status_key(task),
+                project=project,
+                initial={"status": workflow_status_key(task)},
+            ),
             "comments": task.comments.select_related("author"),
             "comment_form": TaskCommentForm(),
         },
@@ -120,14 +169,19 @@ def task_detail(request, project_id, task_id):
 def task_update(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
     task = get_object_or_404(
-        project.tasks.select_related("assignee", "created_by", "project").prefetch_related("labels"),
+        project.tasks.select_related(
+            "assignee",
+            "created_by",
+            "project",
+            "workflow_state",
+        ).prefetch_related("labels"),
         pk=task_id,
     )
     if not can_edit_task(request.user, task):
         raise PermissionDenied("You do not have permission to edit this task.")
 
     previous_assignee_id = task.assignee_id
-    previous_status = task.status
+    previous_status = workflow_status_key(task)
     if request.method == "POST":
         form = TaskForm(request.POST, instance=task, project=project)
         if form.is_valid():
@@ -135,7 +189,7 @@ def task_update(request, project_id, task_id):
                 task = form.save()
                 if task.assignee_id and task.assignee_id != previous_assignee_id:
                     notify_task_assignment(task)
-                if task.status != previous_status:
+                if workflow_status_key(task) != previous_status:
                     notify_task_status_change(task, request.user)
             messages.success(request, f"Task '{task.title}' updated successfully.")
             return redirect(
@@ -164,20 +218,52 @@ def task_update(request, project_id, task_id):
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
+def task_delete(request, project_id, task_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    task = get_object_or_404(project.tasks, pk=task_id)
+    if not can_edit_task(request.user, task):
+        raise PermissionDenied("You do not have permission to delete this task.")
+
+    if request.method == "POST":
+        task_title = task.title
+        task.delete()
+        messages.success(request, f"Task '{task_title}' was deleted.")
+        return redirect("tasks:task-list", project_id=project.pk)
+
+    return render(
+        request,
+        "task_confirm_delete.html",
+        {"project": project, "task": task},
+    )
+
+
+@login_required
 @require_POST
 def task_update_status(request, project_id, task_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
-    task = get_object_or_404(project.tasks.select_related("assignee", "created_by"), pk=task_id)
+    task = get_object_or_404(
+        project.tasks.select_related("assignee", "created_by", "workflow_state"),
+        pk=task_id,
+    )
     if not can_edit_task(request.user, task):
         raise PermissionDenied("You do not have permission to update this task.")
 
-    status_form = TaskStatusForm(request.POST)
+    status_form = TaskStatusForm(
+        request.POST,
+        current_status=workflow_status_key(task),
+        project=project,
+    )
     if status_form.is_valid():
-        previous_status = task.status
-        task.status = status_form.cleaned_data["status"]
+        previous_status = workflow_status_key(task)
         with transaction.atomic():
+            set_task_workflow_status(
+                task,
+                status_form.cleaned_data["status"],
+                project,
+            )
             task.save()
-            if task.status != previous_status:
+            if workflow_status_key(task) != previous_status:
                 notify_task_status_change(task, request.user)
         messages.success(request, "Task status updated.")
         return redirect(
@@ -199,6 +285,80 @@ def task_update_status(request, project_id, task_id):
             "comment_form": TaskCommentForm(),
         },
         status=400,
+    )
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def workflow_configure(request, project_id):
+    project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    if not can_manage_project(request.user, project):
+        raise PermissionDenied("You do not have permission to configure this workflow.")
+
+    if request.method == "POST":
+        form = WorkflowConfigurationForm(request.POST, project=project)
+        if form.is_valid():
+            with transaction.atomic():
+                project.workflow_states.update(is_initial=False, is_final=False)
+                for existing_state in project.workflow_states.all():
+                    existing_state.name = f"__pending_{existing_state.key}__"
+                    existing_state.save(update_fields=["name"])
+                state_objects = {}
+                for position, state_data in enumerate(form.workflow_states):
+                    state, _ = WorkflowState.objects.update_or_create(
+                        project=project,
+                        key=state_data["key"],
+                        defaults={
+                            "name": state_data["name"],
+                            "position": position,
+                            "is_initial": state_data["is_initial"],
+                            "is_final": state_data["is_final"],
+                        },
+                    )
+                    state_objects[state.key] = state
+
+                WorkflowTransition.objects.filter(
+                    from_state__project=project
+                ).delete()
+                WorkflowTransition.objects.bulk_create(
+                    [
+                        WorkflowTransition(
+                            from_state=state_objects[source],
+                            to_state=state_objects[target],
+                        )
+                        for source, target in form.workflow_transitions
+                    ]
+                )
+                project.workflow_states.exclude(
+                    key__in=state_objects
+                ).delete()
+
+                for state_key, state in state_objects.items():
+                    tasks = project.tasks.filter(
+                        Q(workflow_state=state)
+                        | Q(workflow_state__isnull=True, status=state_key)
+                    )
+                    for task in tasks.select_related("workflow_state"):
+                        task.workflow_state = state
+                        task.status = task_status_for_workflow_state(state)
+                        task.save(
+                            update_fields=[
+                                "workflow_state",
+                                "status",
+                                "completed_at",
+                                "updated_at",
+                            ]
+                        )
+
+            messages.success(request, "Project workflow updated successfully.")
+            return redirect("projects:project-detail", project_id=project.pk)
+    else:
+        form = WorkflowConfigurationForm(project=project)
+
+    return render(
+        request,
+        "tasks/workflow_form.html",
+        {"project": project, "form": form},
     )
 
 
@@ -234,7 +394,11 @@ def task_add_comment(request, project_id, task_id):
             "task": task,
             "can_edit_task": can_edit_task(request.user, task),
             "can_update_status": can_edit_task(request.user, task),
-            "status_form": TaskStatusForm(initial={"status": task.status}),
+            "status_form": TaskStatusForm(
+                current_status=workflow_status_key(task),
+                project=project,
+                initial={"status": workflow_status_key(task)},
+            ),
             "comments": task.comments.select_related("author"),
             "comment_form": form,
         },

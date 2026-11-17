@@ -17,6 +17,7 @@
         {% if can_manage_project %}
         <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create task</a>
         <a class="button button-secondary" href="{% url 'projects:project-update' project.pk %}">Edit project</a>
+        <a class="button button-secondary" href="{% url 'tasks:workflow-configure' project.pk %}">Configure workflow</a>
         {% if project.status != "ARCHIVED" %}
         <form method="post" action="{% url 'projects:project-archive' project.pk %}">
             {% csrf_token %}

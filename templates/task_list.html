@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}Tasks - {{ project.name }} | PMS{% endblock %}
 
@@ -9,8 +10,8 @@
 {% block content %}
 <section class="projects-intro" aria-labelledby="tasks-list-heading">
     <div>
-        <h2 id="tasks-list-heading">Tasks</h2>
-        <p>Review and track tasks for <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a>.</p>
+        <h2 id="tasks-list-heading">Kanban board</h2>
+        <p>Track and move tasks for <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a>.</p>
     </div>
     <div class="project-form-actions">
         {% if can_create_task %}
@@ -20,41 +21,62 @@
     </div>
 </section>
 
-{% if tasks %}
-<ul class="projects-list">
-    {% for task in tasks %}
-    <li class="card project-list-card">
-        <div class="project-list-heading">
-            <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
-            <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
-                {{ task.get_status_display }}
-            </span>
-        </div>
-        <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
-        <div class="task-list-meta">
-            <span><span class="task-meta-label">Priority</span><strong>{{ task.get_priority_display }}</strong></span>
-            <span><span class="task-meta-label">Assignee</span><strong>{{ task.assignee.full_name|default:task.assignee.email|default:"Unassigned" }}</strong></span>
-            <span><span class="task-meta-label">Due date</span><strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
-        </div>
-        {% if task.labels.all %}
-        <div class="task-labels-list">
-            {% for label in task.labels.all %}
-            <span class="task-label">{{ label.name }}</span>
+<div class="kanban-board" data-kanban-board aria-label="Task board">
+    {% for column in board_columns %}
+    <section class="kanban-column" data-kanban-column="{{ column.value }}" aria-labelledby="kanban-heading-{{ column.value }}">
+        <header class="kanban-column-header">
+            <h2 id="kanban-heading-{{ column.value }}">{{ column.label }}</h2>
+            <span class="kanban-column-count">{{ column.tasks|length }}</span>
+        </header>
+        <div class="kanban-column-cards">
+            {% for task in column.tasks %}
+            <article class="kanban-card{% if task.can_move and task.allowed_status_choices %} kanban-card-movable{% endif %}"
+                data-kanban-card
+                data-task-id="{{ task.pk }}"
+                draggable="{% if task.can_move and task.allowed_status_choices %}true{% else %}false{% endif %}">
+                <h3>
+                    <a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a>
+                </h3>
+                <div class="kanban-card-badges">
+                    <span class="priority-value priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span>
+                    <span class="kanban-assignee">
+                        {% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}
+                    </span>
+                </div>
+                <p class="kanban-card-due">
+                    <span>Due</span>
+                    <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong>
+                </p>
+                {% if task.labels.all %}
+                <div class="task-labels-list">
+                    {% for label in task.labels.all %}
+                    <span class="task-label">{{ label.name }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% if task.can_move %}
+                <form class="kanban-move-form" method="post" action="{% url 'tasks:task-update-status' project.pk task.pk %}">
+                    {% csrf_token %}
+                    <label class="visually-hidden" for="task-status-{{ task.pk }}">Move {{ task.title }} to</label>
+                    <select id="task-status-{{ task.pk }}" name="status" aria-label="Move {{ task.title }} to">
+                        {% for value, label in task.allowed_status_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit">Move</button>
+                </form>
+                {% endif %}
+            </article>
+            {% empty %}
+            <p class="kanban-column-empty">No tasks in this stage.</p>
             {% endfor %}
         </div>
-        {% endif %}
-    </li>
+    </section>
     {% endfor %}
-</ul>
-{% else %}
-<div class="card projects-empty-state">
-    <h3>No tasks yet</h3>
-    <p>This project does not have any tasks yet.</p>
-    {% if can_create_task %}
-    <div class="pending-action" style="margin-top: 1rem;">
-        <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create first task</a>
-    </div>
-    {% endif %}
 </div>
-{% endif %}
+<p class="visually-hidden" data-kanban-announcement aria-live="polite"></p>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/kanban.js' %}" defer></script>
 {% endblock %}

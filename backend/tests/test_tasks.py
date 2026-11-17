@@ -10,7 +10,7 @@ from django.urls import reverse
 
 from projects.models import Project, ProjectMembership
 from tasks.forms import TaskForm
-from tasks.models import Task, TaskLabel
+from tasks.models import Task, TaskComment, TaskDueReminder, TaskLabel
 
 User = get_user_model()
 
@@ -303,7 +303,7 @@ class TaskFormTests(TestCase):
                 "priority": "HIGH",
                 "due_date": "2026-12-31",
                 "assignee": str(self.member.pk),
-                "status": "IN_PROGRESS",
+                "status": "TODO",
                 "labels": "testing, Quality, Backend",
             },
             project=self.project,
@@ -317,12 +317,34 @@ class TaskFormTests(TestCase):
         self.assertEqual(task.title, "Write unit tests")
         self.assertEqual(task.assignee, self.member)
         self.assertEqual(task.priority, Task.Priority.HIGH)
-        self.assertEqual(task.status, Task.Status.IN_PROGRESS)
+        self.assertEqual(task.status, Task.Status.TODO)
         self.assertEqual(task.labels.count(), 3)
         self.assertEqual(
             set(task.labels.values_list("name", flat=True)),
             {"testing", "quality", "backend"},
         )
+
+    def test_new_tasks_can_only_start_in_backlog_or_to_do(self):
+        form = TaskForm(project=self.project)
+
+        self.assertEqual(
+            list(form.fields["status"].choices),
+            [
+                (Task.Status.BACKLOG, "Backlog"),
+                (Task.Status.TODO, "To Do"),
+            ],
+        )
+
+        invalid_form = TaskForm(
+            data={
+                "title": "Skip workflow stages",
+                "priority": Task.Priority.MEDIUM,
+                "status": Task.Status.DONE,
+            },
+            project=self.project,
+        )
+        self.assertFalse(invalid_form.is_valid())
+        self.assertIn("status", invalid_form.errors)
 
     def test_missing_required_title(self):
         form = TaskForm(
@@ -475,7 +497,7 @@ class TaskFormTests(TestCase):
             data={
                 "title": "Initial Task Updated",
                 "priority": "MEDIUM",
-                "status": "DONE",
+                "status": "IN_PROGRESS",
                 "labels": "v1, hotfix",
             },
             instance=task,
@@ -483,11 +505,33 @@ class TaskFormTests(TestCase):
         self.assertTrue(update_form.is_valid())
         updated_task = update_form.save()
 
-        self.assertEqual(updated_task.status, Task.Status.DONE)
+        self.assertEqual(updated_task.status, Task.Status.IN_PROGRESS)
         self.assertEqual(
             set(updated_task.labels.values_list("name", flat=True)),
             {"v1", "hotfix"},
         )
+
+    def test_edit_form_rejects_skipping_required_workflow_stages(self):
+        task = Task.objects.create(
+            project=self.project,
+            title="Workflow task",
+            created_by=self.owner,
+            status=Task.Status.TODO,
+        )
+        form = TaskForm(
+            data={
+                "title": task.title,
+                "priority": task.priority,
+                "status": Task.Status.DONE,
+                "assignee": "",
+                "labels": "",
+            },
+            instance=task,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("status", form.errors)
+        self.assertIn("Review", form.errors["status"][0])
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -575,6 +619,131 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
+
+    def test_task_delete_confirmation_does_not_delete_until_post(self):
+        self.client.force_login(self.owner)
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        detail_response = self.client.get(detail_url)
+        self.assertContains(detail_response, delete_url)
+
+        response = self.client.get(delete_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This action cannot be undone.")
+        self.assertContains(response, detail_url)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+
+    def test_authorized_user_can_delete_task_and_task_owned_data(self):
+        comment = TaskComment.objects.create(
+            task=self.task,
+            author=self.owner,
+            body="Task-specific comment",
+        )
+        reminder = TaskDueReminder.objects.create(
+            task=self.task,
+            due_date=date(2026, 11, 5),
+        )
+        label = self.task.labels.get()
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        task_list_url = reverse(
+            "tasks:task-list",
+            kwargs={"project_id": self.project.pk},
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(delete_url)
+
+        self.assertRedirects(response, task_list_url)
+        self.assertFalse(Task.objects.filter(pk=self.task.pk).exists())
+        self.assertFalse(TaskComment.objects.filter(pk=comment.pk).exists())
+        self.assertFalse(TaskDueReminder.objects.filter(pk=reminder.pk).exists())
+        self.assertTrue(TaskLabel.objects.filter(pk=label.pk).exists())
+        self.assertFalse(label.tasks.filter(pk=self.task.pk).exists())
+        self.assertTrue(Project.objects.filter(pk=self.project.pk).exists())
+        self.assertTrue(User.objects.filter(pk=self.owner.pk).exists())
+
+        list_response = self.client.get(task_list_url)
+        detail_response = self.client.get(
+            reverse(
+                "tasks:task-detail",
+                kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+            )
+        )
+        self.assertNotContains(list_response, "First Secure Task")
+        self.assertEqual(detail_response.status_code, 404)
+        dashboard_response = self.client.get(reverse("projects:dashboard"))
+        self.assertEqual(dashboard_response.context["total_tasks"], 0)
+
+    def test_project_member_without_task_edit_permission_cannot_delete_task(self):
+        viewer = User.objects.create_user(
+            email="viewer@example.com",
+            username="viewer",
+            full_name="Project Viewer",
+            password=None,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=viewer,
+            project_role=ProjectMembership.Role.TEAM_MEMBER,
+        )
+        self.client.force_login(viewer)
+        detail_url = reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        detail_response = self.client.get(detail_url)
+        delete_response = self.client.post(delete_url)
+
+        self.assertNotContains(detail_response, delete_url)
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+
+    def test_outsider_cannot_delete_task(self):
+        self.client.force_login(self.outsider)
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+
+        response = self.client.post(delete_url)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+
+    def test_task_delete_requires_post_and_csrf(self):
+        delete_url = reverse(
+            "tasks:task-delete",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.delete(delete_url)
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.owner)
+        denied_response = csrf_client.post(delete_url)
+
+        self.assertEqual(denied_response.status_code, 403)
+        self.assertTrue(Task.objects.filter(pk=self.task.pk).exists())
 
     def test_authorized_manager_can_create_task(self):
         self.client.login(email="manager@example.com", password="password123")

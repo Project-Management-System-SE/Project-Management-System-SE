@@ -159,8 +159,10 @@ requests.
 Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
 tasks in projects they can access. Project Admins and Project Managers can update any task
 status; an authorized project member can update a task assigned to them or created by them.
-Supported statuses are **To Do**, **In Progress**, and **Done**. Task details also support
-creation, editing, and project-scoped labels.
+The project task page displays a Kanban board with **Backlog**, **To Do**, **In Progress**,
+**Review**, and **Done** columns. Tasks can move one stage at a time; a task must pass through
+Review before it can be marked Done. Task details also support creation, editing, deletion, and
+project-scoped labels.
 
 Invalid status values are rejected without changing the saved task. Run
 `python backend/manage.py migrate` after pulling changes to apply database migrations.

@@ -92,8 +92,17 @@ class DashboardViewTests(TestCase):
         self.assertEqual(active_summary.completed_task_count, 1)
         self.assertEqual(active_summary.completion_percentage, 33)
         self.assertEqual(
-            [status["count"] for status in active_summary.status_breakdown],
-            [1, 1, 1],
+            {
+                status["value"]: status["count"]
+                for status in active_summary.status_breakdown
+            },
+            {
+                Task.Status.BACKLOG: 0,
+                Task.Status.TODO: 1,
+                Task.Status.IN_PROGRESS: 1,
+                Task.Status.REVIEW: 0,
+                Task.Status.DONE: 1,
+            },
         )
         planned_summary = next(
             project for project in response.context["projects"] if project == planned_project
@@ -324,6 +333,37 @@ class ProjectViewTests(TestCase):
         self.assertContains(response, "Prepare the upcoming release")
         self.assertContains(response, "On Hold")
         self.assertContains(response, "Progress unavailable")
+
+    def test_project_list_search_and_status_filters_can_be_combined(self):
+        matching_project = Project.objects.create(
+            name="Release planning",
+            description="Prepare for launch",
+            owner=self.owner,
+            status=Project.Status.ACTIVE,
+        )
+        Project.objects.create(
+            name="Release archive",
+            description="Old release work",
+            owner=self.owner,
+            status=Project.Status.ARCHIVED,
+        )
+        Project.objects.create(
+            name="Infrastructure",
+            description="Deployment systems",
+            owner=self.owner,
+            status=Project.Status.ACTIVE,
+        )
+
+        self.client.force_login(self.owner)
+        response = self.client.get(
+            reverse("projects:project-list"),
+            {"q": "release", "status": Project.Status.ACTIVE},
+        )
+
+        self.assertEqual(list(response.context["projects"]), [matching_project])
+        self.assertEqual(response.context["search_query"], "release")
+        self.assertEqual(response.context["selected_status"], Project.Status.ACTIVE)
+        self.assertContains(response, "Clear")
 
     def test_project_form_supplies_template_fields(self):
         self.client.force_login(self.admin)

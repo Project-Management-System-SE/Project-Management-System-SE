@@ -104,8 +104,24 @@ def dashboard(request):
 @login_required
 def project_list(request):
     projects = visible_projects_for(request.user)
+    search_query = request.GET.get("q", "").strip()
+    selected_status = request.GET.get("status", "")
+
+    if search_query:
+        projects = projects.filter(
+            Q(name__icontains=search_query)
+            | Q(description__icontains=search_query)
+        )
+    if selected_status not in dict(Project.Status.choices):
+        selected_status = ""
+    if selected_status:
+        projects = projects.filter(status=selected_status)
+
     context = {
         "projects": projects,
+        "search_query": search_query,
+        "selected_status": selected_status,
+        "project_status_choices": Project.Status.choices,
         "can_create_project": can_create_project(request.user),
         "manageable_project_ids": manageable_project_ids_for(request.user, projects),
     }

@@ -5,9 +5,14 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.core.mail import send_mail
 from django.db import transaction
 from django.shortcuts import redirect, render
-from django.urls import reverse_lazy
+from django.urls import reverse, reverse_lazy
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
+from django.views.decorators.http import require_GET
 
 from .forms import RegistrationForm
+from .models import User
+from .tokens import email_confirmation_token
 
 
 class EmailLoginForm(AuthenticationForm):
@@ -35,16 +40,24 @@ def register(request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
             with transaction.atomic():
-                user = form.save()
+                user = form.save(commit=False)
+                user.is_active = False
+                user.save()
+                confirmation_path = reverse(
+                    "email-confirm",
+                    kwargs={
+                        "uidb64": urlsafe_base64_encode(force_bytes(user.pk)),
+                        "token": email_confirmation_token.make_token(user),
+                    },
+                )
                 sent_count = send_mail(
-                    subject="Welcome to Project Management System",
+                    subject="Confirm your Project Management System email",
                     message=(
                         f"Hello {user.full_name},\n\n"
-                        "Your Project Management System account has been created "
-                        "successfully with this email address. You can now log in "
-                        "using your email address and password.\n\n"
-                        "If you did not create this account, please contact your "
-                        "system administrator."
+                        "Confirm your email address to activate your account:\n"
+                        f"{request.build_absolute_uri(confirmation_path)}\n\n"
+                        "This link expires after 24 hours. If you did not create "
+                        "this account, you can ignore this message."
                     ),
                     from_email=settings.DEFAULT_FROM_EMAIL,
                     recipient_list=[user.email],
@@ -55,13 +68,31 @@ def register(request):
 
             messages.success(
                 request,
-                f"Your account has been created. A confirmation email was sent to {user.email}.",
+                f"Check {user.email} for a link to confirm your email address.",
             )
             return redirect("login")
     else:
         form = RegistrationForm()
 
     return render(request, "registration/register.html", {"form": form})
+
+
+@require_GET
+def confirm_email(request, uidb64, token):
+    try:
+        user_id = force_str(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=user_id, is_active=False)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user is None or not email_confirmation_token.check_token(user, token):
+        messages.error(request, "This email confirmation link is invalid or has expired.")
+        return redirect("login")
+
+    user.is_active = True
+    user.save(update_fields=["is_active"])
+    messages.success(request, "Your email address is confirmed. You can now log in.")
+    return redirect("login")
 
 
 class PasswordResetView(auth_views.PasswordResetView):
