@@ -287,20 +287,23 @@ rest.
 ### Render deployment
 
 The application supports Render PostgreSQL through `DATABASE_URL`, serves collected static assets
-with WhiteNoise, and exposes `/health/` as a database-aware health check. Configure the Render web
-service with:
+with WhiteNoise, and exposes `/health/` as a database-aware health check. Set the Render web
+service's **Root Directory** to `backend` and configure:
 
-- **Build command:** `python -m pip install -r backend/requirements.txt && python backend/manage.py collectstatic --noinput`
-- **Start command:** `python backend/manage.py migrate --noinput && gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:$PORT`
+- **Build command:** `python -m pip install -r requirements.txt && python manage.py collectstatic --noinput`
+- **Start command:** `python manage.py migrate --noinput && python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT`
 - **Health check path:** `/health/`
 
-Attach a Render PostgreSQL database and set `DATABASE_URL` to its internal connection string. Also
-configure `DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, and
-`DJANGO_TRUST_X_FORWARDED_PROTO=true`. Production enables HTTPS redirect, secure cookies, and
-one-year HSTS by default; only reduce `DJANGO_SECURE_HSTS_SECONDS` if HTTPS is not permanently
-available. Leave HSTS subdomain and preload options disabled unless every affected hostname is
-HTTPS-only and you intentionally want the browser-preload commitment. Set
-`DJANGO_MEDIA_ROOT=/var/data/media` and attach persistent storage mounted at `/var/data`, or
+`backend/requirements.txt` installs Gunicorn, Psycopg, `dj-database-url`, and WhiteNoise. The
+`python -m gunicorn` invocation uses the same Python environment that installed the dependencies.
+Attach a Render PostgreSQL database and set `DATABASE_URL` to its internal connection string.
+`DATABASE_URL` is required when `DJANGO_DEBUG=false`; startup fails rather than falling back to
+SQLite if it is missing. Also configure `DJANGO_DEBUG=false`, a long random `DJANGO_SECRET_KEY`,
+`DJANGO_ALLOWED_HOSTS`, and `DJANGO_TRUST_X_FORWARDED_PROTO=true`. Production enables HTTPS
+redirect, secure cookies, and one-year HSTS by default; only reduce `DJANGO_SECURE_HSTS_SECONDS`
+if HTTPS is not permanently available. Leave HSTS subdomain and preload options disabled unless
+every affected hostname is HTTPS-only and you intentionally want the browser-preload commitment.
+Set `DJANGO_MEDIA_ROOT=/var/data/media` and attach persistent storage mounted at `/var/data`, or
 configure durable object storage; Render's service filesystem is ephemeral and task attachments
 would otherwise be lost on redeploy. Configure the SMTP environment variables above for
 registration and password-reset email.

@@ -93,6 +93,8 @@ if DATABASE_URL:
             conn_health_checks=True,
         )
     }
+elif not DEBUG:
+    raise ImproperlyConfigured("DATABASE_URL must be set when DEBUG is False.")
 else:
     DATABASES = {
         "default": {

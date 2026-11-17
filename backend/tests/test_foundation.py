@@ -97,6 +97,35 @@ class SettingsTests(SimpleTestCase):
             "whitenoise.storage.CompressedManifestStaticFilesStorage",
         )
 
+    def test_production_requires_database_url_instead_of_falling_back_to_sqlite(self):
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "DJANGO_DEBUG": "false",
+                "DJANGO_SECRET_KEY": "test-deployment-secret-with-adequate-length-0123456789",
+            }
+        )
+        environment.pop("DATABASE_URL", None)
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from django.conf import settings; print(settings.DATABASES)",
+            ],
+            cwd=settings.BASE_DIR,
+            env=environment,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "DATABASE_URL must be set when DEBUG is False.",
+            result.stderr,
+        )
+
 
 class HealthCheckTests(TestCase):
     def test_health_check_reports_application_and_database_status(self):
