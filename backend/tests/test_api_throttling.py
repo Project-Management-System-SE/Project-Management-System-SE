@@ -70,3 +70,15 @@ class ApiThrottlingTests(TestCase):
         self.assertEqual(second.status_code, 429)
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
+
+    def test_session_api_routes_share_the_configured_rate_limit(self):
+        self.client.force_login(self.user)
+        url = reverse("api-project-list")
+        first = self.client.get(url)
+        second = self.client.get(url)
+        third = self.client.get(url)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(third.status_code, 429)
+        self.assertEqual(third["Retry-After"], "60")
