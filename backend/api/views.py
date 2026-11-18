@@ -31,9 +31,12 @@ from tasks.workflow import (
 from .auth import api_auth_required
 from .helpers import (
     error_response,
+    paginate_queryset,
+    parse_query_date,
     serialize_project,
     serialize_task,
     success_response,
+    validate_query_parameters,
 )
 
 
@@ -101,8 +104,36 @@ def project_report_api(request, project_id):
 @require_http_methods(["GET"])
 def project_list_api(request):
     projects = visible_projects_for(request.user).select_related("owner")
-    data = [serialize_project(p) for p in projects]
-    return success_response({"projects": data, "count": len(data)})
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "start_after", "start_before", "due_after", "due_before"},
+    )
+    if error:
+        return error
+    status = request.GET.get("status")
+    if status:
+        if status not in Project.Status.values:
+            return error_response("Invalid project status.", status=400, errors={"status": ["Choose a valid project status."]})
+        projects = projects.filter(status=status)
+    for parameter, field, lookup in (
+        ("start_after", "start_date", "gte"),
+        ("start_before", "start_date", "lte"),
+        ("due_after", "due_date", "gte"),
+        ("due_before", "due_date", "lte"),
+    ):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            projects = projects.filter(**{f"{field}__{lookup}": value})
+    page_data, error = paginate_queryset(request, projects.order_by("-created_at", "-pk"))
+    if error:
+        return error
+    page, metadata = page_data
+    return success_response({
+        "projects": [serialize_project(project) for project in page.object_list],
+        **metadata,
+    })
 
 
 @csrf_exempt
@@ -128,18 +159,67 @@ def task_list_create_api(request, project_id):
 
     if request.method == "GET":
         tasks_qs = project.tasks.select_related("assignee", "sprint", "milestone")
+        error = validate_query_parameters(
+            request,
+            {
+                "page", "page_size", "status", "priority", "assignee_id", "sprint",
+                "milestone", "created_after", "created_before", "due_after", "due_before",
+            },
+        )
+        if error:
+            return error
         status_filter = request.GET.get("status")
         if status_filter:
-            tasks_qs = tasks_qs.filter(status=status_filter)
+            valid_statuses = {key for key, _ in workflow_choices_for(project)}
+            if status_filter not in valid_statuses:
+                return error_response("Invalid task status.", status=400, errors={"status": ["Choose a valid workflow status."]})
+            if project.workflow_states.exists():
+                tasks_qs = tasks_qs.filter(workflow_state__key=status_filter)
+            else:
+                tasks_qs = tasks_qs.filter(status=status_filter)
         priority_filter = request.GET.get("priority")
         if priority_filter:
+            if priority_filter not in Task.Priority.values:
+                return error_response("Invalid task priority.", status=400, errors={"priority": ["Choose a valid priority."]})
             tasks_qs = tasks_qs.filter(priority=priority_filter)
         assignee_id = request.GET.get("assignee_id")
         if assignee_id:
+            if not assignee_id.isdecimal():
+                return error_response("assignee_id must be a positive integer.", status=400)
             tasks_qs = tasks_qs.filter(assignee_id=assignee_id)
-
-        data = [serialize_task(t) for t in tasks_qs]
-        return success_response({"tasks": data, "count": len(data)})
+        sprint_id = request.GET.get("sprint")
+        if sprint_id:
+            if not sprint_id.isdecimal():
+                return error_response("sprint must be a positive integer.", status=400)
+            if not project.sprints.filter(pk=sprint_id).exists():
+                return error_response("Sprint does not belong to this project.", status=400)
+            tasks_qs = tasks_qs.filter(sprint_id=sprint_id)
+        milestone_id = request.GET.get("milestone")
+        if milestone_id:
+            if not milestone_id.isdecimal():
+                return error_response("milestone must be a positive integer.", status=400)
+            if not project.milestones.filter(pk=milestone_id).exists():
+                return error_response("Milestone does not belong to this project.", status=400)
+            tasks_qs = tasks_qs.filter(milestone_id=milestone_id)
+        for parameter, field, lookup in (
+            ("created_after", "created_at__date", "gte"),
+            ("created_before", "created_at__date", "lte"),
+            ("due_after", "due_date", "gte"),
+            ("due_before", "due_date", "lte"),
+        ):
+            value, error = parse_query_date(request, parameter)
+            if error:
+                return error
+            if value:
+                tasks_qs = tasks_qs.filter(**{f"{field}__{lookup}": value})
+        page_data, error = paginate_queryset(request, tasks_qs.order_by("-created_at", "-pk"))
+        if error:
+            return error
+        page, metadata = page_data
+        return success_response({
+            "tasks": [serialize_task(task) for task in page.object_list],
+            **metadata,
+        })
 
     if not can_create_task_in(request.user, project):
         return error_response("You do not have permission to create tasks in this project.", status=403)
@@ -336,9 +416,16 @@ def task_comment_api(request, project_id, task_id):
         return error_response("Task not found.", status=404)
 
     if request.method == "GET":
+        error = validate_query_parameters(request, {"page", "page_size"})
+        if error:
+            return error
         comments = task.comments.select_related("author").order_by("created_at", "pk")
-        data = [_serialize_comment(comment) for comment in comments]
-        return success_response({"comments": data, "count": len(data)})
+        page_data, error = paginate_queryset(request, comments)
+        if error:
+            return error
+        page, metadata = page_data
+        data = [_serialize_comment(comment) for comment in page.object_list]
+        return success_response({"comments": data, **metadata})
 
     body, error = _read_api_json(request)
     if error:
@@ -421,9 +508,21 @@ def project_membership_api(request, project_id):
         return error_response("Project not found or access denied.", status=404)
 
     if request.method == "GET":
+        error = validate_query_parameters(request, {"page", "page_size", "role"})
+        if error:
+            return error
         memberships = project.memberships.select_related("user").order_by("user_id")
-        data = [_serialize_membership(membership) for membership in memberships]
-        return success_response({"members": data, "count": len(data)})
+        role = request.GET.get("role")
+        if role:
+            if role not in ProjectMembership.Role.values:
+                return error_response("Invalid project membership role.", status=400, errors={"role": ["Choose a valid role."]})
+            memberships = memberships.filter(project_role=role)
+        page_data, error = paginate_queryset(request, memberships)
+        if error:
+            return error
+        page, metadata = page_data
+        data = [_serialize_membership(membership) for membership in page.object_list]
+        return success_response({"members": data, **metadata})
 
     if not can_manage_project(request.user, project):
         return error_response("You do not have permission to manage project memberships.", status=403)
@@ -710,7 +809,33 @@ def sprint_list_api(request, project_id):
             "end_date": sprint.end_date.isoformat(),
         }, status=201)
 
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "start_after", "start_before", "end_after", "end_before"},
+    )
+    if error:
+        return error
     sprints = project.sprints.all().order_by("start_date", "pk")
+    status_filter = request.GET.get("status")
+    if status_filter:
+        if status_filter not in Sprint.Status.values:
+            return error_response("Invalid sprint status.", status=400, errors={"status": ["Choose a valid sprint status."]})
+        sprints = sprints.filter(status=status_filter)
+    for parameter, field, lookup in (
+        ("start_after", "start_date", "gte"),
+        ("start_before", "start_date", "lte"),
+        ("end_after", "end_date", "gte"),
+        ("end_before", "end_date", "lte"),
+    ):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            sprints = sprints.filter(**{f"{field}__{lookup}": value})
+    page_data, error = paginate_queryset(request, sprints.order_by("start_date", "pk"))
+    if error:
+        return error
+    page, metadata = page_data
     data = [
         {
             "id": s.pk,
@@ -721,9 +846,9 @@ def sprint_list_api(request, project_id):
             "end_date": s.end_date.isoformat() if s.end_date else None,
             "task_count": s.tasks.count(),
         }
-        for s in sprints
+        for s in page.object_list
     ]
-    return success_response({"sprints": data, "count": len(data)})
+    return success_response({"sprints": data, **metadata})
 
 
 @csrf_exempt
@@ -824,7 +949,28 @@ def milestone_list_api(request, project_id):
             "status": milestone.status,
         }, status=201)
 
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "target_after", "target_before"},
+    )
+    if error:
+        return error
     milestones = project.milestones.all().order_by("target_date", "pk")
+    status_filter = request.GET.get("status")
+    if status_filter:
+        if status_filter not in Milestone.Status.values:
+            return error_response("Invalid milestone status.", status=400, errors={"status": ["Choose a valid milestone status."]})
+        milestones = milestones.filter(status=status_filter)
+    for parameter, lookup in (("target_after", "gte"), ("target_before", "lte")):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            milestones = milestones.filter(**{f"target_date__{lookup}": value})
+    page_data, error = paginate_queryset(request, milestones.order_by("target_date", "pk"))
+    if error:
+        return error
+    page, metadata = page_data
     data = [
         {
             "id": m.pk,
@@ -833,9 +979,9 @@ def milestone_list_api(request, project_id):
             "target_date": m.target_date.isoformat() if m.target_date else None,
             "task_count": m.tasks.count(),
         }
-        for m in milestones
+        for m in page.object_list
     ]
-    return success_response({"milestones": data, "count": len(data)})
+    return success_response({"milestones": data, **metadata})
 
 
 @csrf_exempt
