@@ -1,6 +1,9 @@
 import json
+from datetime import date
 from decimal import Decimal
+from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.http import JsonResponse
+from functools import wraps
 
 
 def success_response(data, status=200, message=None):
@@ -11,10 +14,118 @@ def success_response(data, status=200, message=None):
 
 
 def error_response(message, status=400, errors=None):
-    payload = {"status": "error", "message": message}
-    if errors:
-        payload["errors"] = errors
+    payload = {
+        "status": "error",
+        "message": message,
+        "errors": errors or {},
+    }
     return JsonResponse(payload, status=status)
+
+
+def api_require_http_methods(allowed_methods):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(request, *args, **kwargs):
+            if request.method not in allowed_methods:
+                response = error_response("Method not allowed.", status=405)
+                response["Allow"] = ", ".join(allowed_methods)
+                return response
+            return view_func(request, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def read_json_object(request):
+    if request.content_type != "application/json":
+        return None, error_response(
+            "Content-Type must be application/json.",
+            status=415,
+        )
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, error_response("Request body is not valid JSON.", status=400)
+    if not isinstance(payload, dict):
+        return None, error_response(
+            "Request body must be a JSON object.",
+            status=400,
+        )
+    return payload, None
+
+
+def paginate_queryset(request, queryset, *, default_page_size=25, max_page_size=100):
+    page_values = request.GET.getlist("page")
+    page_size_values = request.GET.getlist("page_size")
+    if len(page_values) > 1 or len(page_size_values) > 1:
+        return None, error_response(
+            "page and page_size may each be specified only once.",
+            status=400,
+        )
+
+    raw_page = page_values[0] if page_values else "1"
+    raw_page_size = page_size_values[0] if page_size_values else str(default_page_size)
+    try:
+        page_number = int(raw_page)
+        page_size = int(raw_page_size)
+    except (TypeError, ValueError):
+        return None, error_response("page and page_size must be integers.", status=400)
+    if page_number < 1:
+        return None, error_response("page must be a positive integer.", status=400)
+    if not 1 <= page_size <= max_page_size:
+        return None, error_response(
+            f"page_size must be between 1 and {max_page_size}.",
+            status=400,
+        )
+
+    paginator = Paginator(queryset, page_size)
+    try:
+        page = paginator.page(page_number)
+    except (EmptyPage, PageNotAnInteger):
+        return None, error_response("The requested page does not exist.", status=400)
+    metadata = {
+        "count": paginator.count,
+        "page": page.number,
+        "page_size": page_size,
+        "next_page": page.next_page_number() if page.has_next() else None,
+        "previous_page": page.previous_page_number() if page.has_previous() else None,
+    }
+    return (page, metadata), None
+
+
+def validate_query_parameters(request, allowed):
+    unknown = sorted(set(request.GET.keys()) - set(allowed))
+    if unknown:
+        return error_response(
+            "Unknown query parameters.",
+            status=400,
+            errors={"query_parameters": unknown},
+        )
+    repeated = sorted(
+        name for name in request.GET.keys() if len(request.GET.getlist(name)) > 1
+    )
+    if repeated:
+        return error_response(
+            "Query parameters may not be repeated.",
+            status=400,
+            errors={"query_parameters": repeated},
+        )
+    return None
+
+
+def parse_query_date(request, parameter):
+    value = request.GET.get(parameter)
+    if not value:
+        return None, None
+    try:
+        return date.fromisoformat(value), None
+    except ValueError:
+        return None, error_response(
+            f"{parameter} must use YYYY-MM-DD format.",
+            status=400,
+            errors={parameter: ["Enter a valid date."]},
+        )
 
 
 def serialize_project(project):

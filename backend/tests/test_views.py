@@ -226,6 +226,8 @@ class DashboardViewTests(TestCase):
         self.assertEqual(project_summary.completion_percentage, 0)
         self.assertEqual(initial.context["my_tasks"], 1)
 
+        task.status = Task.Status.REVIEW
+        task.save()
         task.status = Task.Status.DONE
         task.assignee = member
         task.save()

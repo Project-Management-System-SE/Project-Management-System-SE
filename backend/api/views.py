@@ -1,16 +1,18 @@
-import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
 
-from projects.models import Project, Sprint, Milestone
+from projects.models import Project, ProjectMembership, Sprint, Milestone
+from tasks.models import Task, TaskComment, WorkflowState, WorkflowTransition
+from tasks.workflow_forms import WorkflowConfigurationForm
 from projects.permissions import visible_projects_for, can_manage_project
-from tasks.models import Task
 from tasks.permissions import (
     can_view_tasks_for,
     can_create_task_in,
@@ -26,25 +28,117 @@ from tasks.workflow import (
 )
 from .auth import api_auth_required
 from .helpers import (
+    api_require_http_methods,
     error_response,
+    paginate_queryset,
+    parse_query_date,
+    read_json_object,
     serialize_project,
     serialize_task,
     success_response,
+    validate_query_parameters,
 )
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
-def project_list_api(request):
-    projects = visible_projects_for(request.user).select_related("owner")
-    data = [serialize_project(p) for p in projects]
-    return success_response({"projects": data, "count": len(data)})
+@api_require_http_methods(["GET"])
+def project_report_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    from projects.reports import (
+        get_project_progress_metrics,
+        get_sprint_velocity_metrics,
+        get_team_workload_metrics,
+    )
+
+    progress = get_project_progress_metrics(project)
+    progress = {
+        key: str(value) if isinstance(value, Decimal) else value
+        for key, value in progress.items()
+    }
+    velocity = get_sprint_velocity_metrics(project)
+    serialized_sprints = []
+    for sprint in velocity["sprints"]:
+        serialized_sprints.append({
+            "name": sprint["name"],
+            "status": sprint["status"],
+            "total_tasks": sprint["total_tasks"],
+            "completed_tasks": sprint["completed_tasks"],
+            "estimated_effort": str(sprint["estimated_effort"]),
+            "completed_effort": str(sprint["completed_effort"]),
+            "velocity": str(sprint["velocity"]) if sprint["velocity"] is not None else None,
+            "is_closed": sprint["is_closed"],
+        })
+    velocity_data = {
+        "sprints": serialized_sprints,
+        "closed_sprint_count": velocity["closed_sprint_count"],
+        "complete_velocity_sprint_count": velocity["velocity_sprint_count"],
+        "incomplete_sprint_count": velocity["incomplete_sprint_count"],
+        "total_completed_effort": str(velocity["total_completed_effort"]),
+        "average_velocity": str(velocity["average_velocity"]) if velocity["average_velocity"] is not None else None,
+    }
+    workload_data = [
+        {
+            "name": item["name"],
+            "email": item["email"],
+            "total_tasks": item["total_tasks"],
+            "active_tasks": item["active_tasks"],
+            "completed_tasks": item["completed_tasks"],
+            "estimated_effort": str(item["estimated_effort"]),
+            "actual_effort": str(item["actual_effort"]),
+        }
+        for item in get_team_workload_metrics(project)
+    ]
+    return success_response({
+        "project_id": project.pk,
+        "progress": progress,
+        "velocity": velocity_data,
+        "workload": workload_data,
+    })
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET"])
+def project_list_api(request):
+    projects = visible_projects_for(request.user).select_related("owner")
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "start_after", "start_before", "due_after", "due_before"},
+    )
+    if error:
+        return error
+    status = request.GET.get("status")
+    if status:
+        if status not in Project.Status.values:
+            return error_response("Invalid project status.", status=400, errors={"status": ["Choose a valid project status."]})
+        projects = projects.filter(status=status)
+    for parameter, field, lookup in (
+        ("start_after", "start_date", "gte"),
+        ("start_before", "start_date", "lte"),
+        ("due_after", "due_date", "gte"),
+        ("due_before", "due_date", "lte"),
+    ):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            projects = projects.filter(**{f"{field}__{lookup}": value})
+    page_data, error = paginate_queryset(request, projects.order_by("-created_at", "-pk"))
+    if error:
+        return error
+    page, metadata = page_data
+    return success_response({
+        "projects": [serialize_project(project) for project in page.object_list],
+        **metadata,
+    })
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET"])
 def project_detail_api(request, project_id):
     try:
         project = visible_projects_for(request.user).select_related("owner").get(pk=project_id)
@@ -56,7 +150,7 @@ def project_detail_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def task_list_create_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
@@ -65,30 +159,92 @@ def task_list_create_api(request, project_id):
 
     if request.method == "GET":
         tasks_qs = project.tasks.select_related("assignee", "sprint", "milestone")
+        error = validate_query_parameters(
+            request,
+            {
+                "page", "page_size", "status", "priority", "assignee_id", "sprint",
+                "milestone", "created_after", "created_before", "due_after", "due_before",
+            },
+        )
+        if error:
+            return error
         status_filter = request.GET.get("status")
         if status_filter:
-            tasks_qs = tasks_qs.filter(status=status_filter)
+            valid_statuses = {key for key, _ in workflow_choices_for(project)}
+            if status_filter not in valid_statuses:
+                return error_response("Invalid task status.", status=400, errors={"status": ["Choose a valid workflow status."]})
+            if project.workflow_states.exists():
+                tasks_qs = tasks_qs.filter(workflow_state__key=status_filter)
+            else:
+                tasks_qs = tasks_qs.filter(status=status_filter)
         priority_filter = request.GET.get("priority")
         if priority_filter:
+            if priority_filter not in Task.Priority.values:
+                return error_response("Invalid task priority.", status=400, errors={"priority": ["Choose a valid priority."]})
             tasks_qs = tasks_qs.filter(priority=priority_filter)
         assignee_id = request.GET.get("assignee_id")
         if assignee_id:
+            if not assignee_id.isdecimal():
+                return error_response("assignee_id must be a positive integer.", status=400)
             tasks_qs = tasks_qs.filter(assignee_id=assignee_id)
-
-        data = [serialize_task(t) for t in tasks_qs]
-        return success_response({"tasks": data, "count": len(data)})
+        sprint_id = request.GET.get("sprint")
+        if sprint_id:
+            if not sprint_id.isdecimal():
+                return error_response("sprint must be a positive integer.", status=400)
+            if not project.sprints.filter(pk=sprint_id).exists():
+                return error_response("Sprint does not belong to this project.", status=400)
+            tasks_qs = tasks_qs.filter(sprint_id=sprint_id)
+        milestone_id = request.GET.get("milestone")
+        if milestone_id:
+            if not milestone_id.isdecimal():
+                return error_response("milestone must be a positive integer.", status=400)
+            if not project.milestones.filter(pk=milestone_id).exists():
+                return error_response("Milestone does not belong to this project.", status=400)
+            tasks_qs = tasks_qs.filter(milestone_id=milestone_id)
+        for parameter, field, lookup in (
+            ("created_after", "created_at__date", "gte"),
+            ("created_before", "created_at__date", "lte"),
+            ("due_after", "due_date", "gte"),
+            ("due_before", "due_date", "lte"),
+        ):
+            value, error = parse_query_date(request, parameter)
+            if error:
+                return error
+            if value:
+                tasks_qs = tasks_qs.filter(**{f"{field}__{lookup}": value})
+        page_data, error = paginate_queryset(request, tasks_qs.order_by("-created_at", "-pk"))
+        if error:
+            return error
+        page, metadata = page_data
+        return success_response({
+            "tasks": [serialize_task(task) for task in page.object_list],
+            **metadata,
+        })
 
     if not can_create_task_in(request.user, project):
         return error_response("You do not have permission to create tasks in this project.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
-
-    title = (body.get("title") or "").strip()
+    body, error = read_json_object(request)
+    if error:
+        return error
+    unknown_fields = sorted(
+        set(body) - {"title", "description", "priority", "assignee_id", "due_date"}
+    )
+    if unknown_fields:
+        return error_response(
+            "Unknown task fields.",
+            status=400,
+            errors={"fields": unknown_fields},
+        )
+    title_value = body.get("title", "")
+    if not isinstance(title_value, str):
+        return error_response("title must be a string.", status=400, errors={"title": ["Enter text."]})
+    title = title_value.strip()
     if len(title) < 3:
-        return error_response("Task title must be at least 3 characters long.", status=400)
+        return error_response("Task title must be at least 3 characters long.", status=400, errors={"title": ["Ensure this field has at least 3 characters."]})
+    description = body.get("description", "")
+    if not isinstance(description, str):
+        return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
 
     priority = body.get("priority", Task.Priority.MEDIUM)
     if priority not in Task.Priority.values:
@@ -97,22 +253,26 @@ def task_list_create_api(request, project_id):
     assignee = None
     assignee_id = body.get("assignee_id")
     if assignee_id:
+        if isinstance(assignee_id, bool) or not str(assignee_id).isdecimal():
+            return error_response("assignee_id must be a positive integer.", status=400, errors={"assignee_id": ["Enter a valid user ID."]})
         from django.contrib.auth import get_user_model
         User = get_user_model()
         try:
-            assignee = User.objects.get(pk=assignee_id)
+            assignee = User.objects.get(pk=int(assignee_id))
             is_valid_assignee = (
                 project.owner_id == assignee.pk
                 or project.memberships.filter(user=assignee).exists()
             )
             if not is_valid_assignee:
                 return error_response("Selected assignee is not an active member of this project.", status=400)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, TypeError, ValueError):
             return error_response("Assignee user does not exist.", status=400)
 
     due_date = body.get("due_date")
     if due_date:
         import datetime
+        if not isinstance(due_date, str):
+            return error_response("due_date must use YYYY-MM-DD format.", status=400, errors={"due_date": ["Enter a valid date."]})
         try:
             due_date = datetime.date.fromisoformat(due_date)
             if project.start_date and due_date < project.start_date:
@@ -123,7 +283,7 @@ def task_list_create_api(request, project_id):
     task = Task.objects.create(
         project=project,
         title=title,
-        description=body.get("description", ""),
+        description=description,
         priority=priority,
         status=Task.Status.TODO,
         assignee=assignee,
@@ -135,7 +295,7 @@ def task_list_create_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "PATCH", "DELETE"])
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
 def task_detail_api(request, task_id):
     try:
         task = Task.objects.select_related("project", "assignee").get(pk=task_id)
@@ -158,18 +318,30 @@ def task_detail_api(request, task_id):
     if not can_edit_task(request.user, task):
         return error_response("You do not have permission to edit this task.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
+    body, error = read_json_object(request)
+    if error:
+        return error
+    unknown_fields = sorted(
+        set(body) - {"title", "description", "priority", "assignee_id"}
+    )
+    if unknown_fields:
+        return error_response(
+            "Unknown task fields.",
+            status=400,
+            errors={"fields": unknown_fields},
+        )
 
     if "title" in body:
+        if not isinstance(body["title"], str):
+            return error_response("title must be a string.", status=400, errors={"title": ["Enter text."]})
         title = body["title"].strip()
         if len(title) < 3:
             return error_response("Task title must be at least 3 characters long.", status=400)
         task.title = title
 
     if "description" in body:
+        if not isinstance(body["description"], str):
+            return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
         task.description = body["description"]
 
     if "priority" in body:
@@ -180,6 +352,10 @@ def task_detail_api(request, task_id):
 
     if "assignee_id" in body:
         new_assignee_id = body["assignee_id"]
+        if new_assignee_id is not None and (
+            isinstance(new_assignee_id, bool) or not str(new_assignee_id).isdecimal()
+        ):
+            return error_response("assignee_id must be a positive integer or null.", status=400, errors={"assignee_id": ["Enter a valid user ID."]})
         if new_assignee_id != task.assignee_id and not can_reassign_task(request.user, task):
             return error_response("You do not have permission to reassign this task.", status=403)
         if new_assignee_id:
@@ -188,18 +364,25 @@ def task_detail_api(request, task_id):
             try:
                 new_assignee = User.objects.get(pk=new_assignee_id)
                 task.assignee = new_assignee
-            except User.DoesNotExist:
+            except (User.DoesNotExist, TypeError, ValueError):
                 return error_response("Assignee user does not exist.", status=400)
         else:
             task.assignee = None
 
-    task.save()
+    try:
+        task.save()
+    except ValidationError as exc:
+        return error_response(
+            "Task validation failed.",
+            status=400,
+            errors=getattr(exc, "message_dict", {"__all__": exc.messages}),
+        )
     return success_response(serialize_task(task), message="Task updated successfully.")
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["POST"])
+@api_require_http_methods(["POST"])
 def task_status_api(request, task_id):
     try:
         task = Task.objects.select_related("project").get(pk=task_id)
@@ -212,10 +395,9 @@ def task_status_api(request, task_id):
     if not can_edit_task(request.user, task):
         return error_response("You do not have permission to update status for this task.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
+    body, error = read_json_object(request)
+    if error:
+        return error
 
     new_status = body.get("status")
     valid_statuses = [value for value, _ in workflow_choices_for(task.project)]
@@ -237,21 +419,476 @@ def task_status_api(request, task_id):
             status=400,
         )
 
-    set_task_workflow_status(task, new_status, task.project)
-    task.save()
+    try:
+        set_task_workflow_status(task, new_status, task.project)
+        task.save()
+    except ValidationError as exc:
+        message = "; ".join(exc.messages)
+        return error_response(message, status=400)
     return success_response(serialize_task(task), message="Task status updated successfully.")
+
+
+def _serialize_comment(comment):
+    return {
+        "id": comment.pk,
+        "task_id": comment.task_id,
+        "author": {
+            "id": comment.author_id,
+            "name": comment.author.full_name or comment.author.username,
+        },
+        "content": comment.content,
+        "created_at": comment.created_at.isoformat(),
+    }
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET", "POST"])
+def task_comment_api(request, project_id, task_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    if not can_view_tasks_for(request.user, project):
+        return error_response("Project not found or access denied.", status=404)
+    task = project.tasks.filter(pk=task_id).first()
+    if task is None:
+        return error_response("Task not found.", status=404)
+
+    if request.method == "GET":
+        error = validate_query_parameters(request, {"page", "page_size"})
+        if error:
+            return error
+        comments = task.comments.select_related("author").order_by("created_at", "pk")
+        page_data, error = paginate_queryset(request, comments)
+        if error:
+            return error
+        page, metadata = page_data
+        data = [_serialize_comment(comment) for comment in page.object_list]
+        return success_response({"comments": data, **metadata})
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    content_value = body.get("content")
+    if not isinstance(content_value, str):
+        return error_response("content must be a string.", status=400, errors={"content": ["Enter text."]})
+    content = content_value.strip()
+    if not content:
+        return error_response("content is required.", status=400)
+    comment = TaskComment.objects.create(task=task, author=request.user, content=content)
+    return success_response(
+        _serialize_comment(comment),
+        status=201,
+        message="Comment created successfully.",
+    )
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["PATCH", "DELETE"])
+def task_comment_detail_api(request, project_id, task_id, comment_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    if not can_view_tasks_for(request.user, project):
+        return error_response("Project not found or access denied.", status=404)
+    task = project.tasks.filter(pk=task_id).first()
+    if task is None:
+        return error_response("Task not found.", status=404)
+    comment = task.comments.select_related("author").filter(pk=comment_id).first()
+    if comment is None:
+        return error_response("Comment not found.", status=404)
+
+    can_manage = can_manage_project(request.user, project)
+    if comment.author_id != request.user.pk and not can_manage:
+        return error_response("You do not have permission to modify this comment.", status=403)
+
+    if request.method == "DELETE":
+        comment.delete()
+        return success_response({"deleted_comment_id": comment_id}, message="Comment deleted successfully.")
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    content_value = body.get("content")
+    if not isinstance(content_value, str):
+        return error_response("content must be a string.", status=400, errors={"content": ["Enter text."]})
+    content = content_value.strip()
+    if not content:
+        return error_response("content is required.", status=400)
+    comment.content = content
+    comment.save(update_fields=["content"])
+    return success_response(_serialize_comment(comment), message="Comment updated successfully.")
+
+
+def _serialize_membership(membership):
+    return {
+        "id": membership.pk,
+        "project_id": membership.project_id,
+        "user": {
+            "id": membership.user_id,
+            "name": membership.user.full_name or membership.user.username,
+            "email": membership.user.email,
+        },
+        "role": membership.project_role,
+        "joined_at": membership.joined_at.isoformat(),
+    }
+
+
+def _read_api_json(request):
+    return read_json_object(request)
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET", "POST"])
+def project_membership_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+
+    if request.method == "GET":
+        error = validate_query_parameters(request, {"page", "page_size", "role"})
+        if error:
+            return error
+        memberships = project.memberships.select_related("user").order_by("user_id")
+        role = request.GET.get("role")
+        if role:
+            if role not in ProjectMembership.Role.values:
+                return error_response("Invalid project membership role.", status=400, errors={"role": ["Choose a valid role."]})
+            memberships = memberships.filter(project_role=role)
+        page_data, error = paginate_queryset(request, memberships)
+        if error:
+            return error
+        page, metadata = page_data
+        data = [_serialize_membership(membership) for membership in page.object_list]
+        return success_response({"members": data, **metadata})
+
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage project memberships.", status=403)
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    user_id = body.get("user_id")
+    role = body.get("role")
+    if isinstance(user_id, bool) or not str(user_id or "").isdecimal():
+        return error_response("user_id is required.", status=400)
+    if role not in ProjectMembership.Role.values:
+        return error_response(
+            f"role must be one of: {list(ProjectMembership.Role.values)}.",
+            status=400,
+        )
+    if (
+        role == ProjectMembership.Role.PROJECT_MANAGER
+        and not request.user.is_admin
+        and project.owner_id != request.user.pk
+    ):
+        return error_response("Only project owners or admins can add Project Managers.", status=403)
+
+    User = get_user_model()
+    try:
+        member = User.objects.get(pk=int(user_id))
+    except (User.DoesNotExist, TypeError, ValueError):
+        return error_response("User not found.", status=400)
+
+    if project.memberships.filter(user=member).exists():
+        return error_response("This user is already a project member.", status=400)
+    try:
+        membership = ProjectMembership.objects.create(
+            project=project,
+            user=member,
+            project_role=role,
+        )
+    except IntegrityError:
+        return error_response("This user is already a project member.", status=400)
+    return success_response(
+        _serialize_membership(membership),
+        status=201,
+        message="Project member added successfully.",
+    )
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["PATCH", "DELETE"])
+def project_membership_detail_api(request, project_id, membership_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    membership = project.memberships.select_related("user").filter(pk=membership_id).first()
+    if membership is None:
+        return error_response("Project membership not found.", status=404)
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage project memberships.", status=403)
+
+    if membership.user_id == project.owner_id:
+        return error_response("The project owner's membership cannot be changed or removed.", status=400)
+
+    if request.method == "DELETE":
+        if (
+            not request.user.is_admin
+            and project.owner_id != request.user.pk
+            and membership.project_role == ProjectMembership.Role.PROJECT_MANAGER
+        ):
+            return error_response("Only project admins can remove Project Managers.", status=403)
+        membership.delete()
+        return success_response(
+            {"deleted_membership_id": membership_id},
+            message="Project member removed successfully.",
+        )
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    role = body.get("role")
+    if role not in ProjectMembership.Role.values:
+        return error_response(
+            f"role must be one of: {list(ProjectMembership.Role.values)}.",
+            status=400,
+        )
+    if (
+        role == ProjectMembership.Role.PROJECT_MANAGER
+        and not request.user.is_admin
+        and project.owner_id != request.user.pk
+    ):
+        return error_response("Only project owners or admins can assign Project Manager role.", status=403)
+    membership.project_role = role
+    membership.save(update_fields=["project_role"])
+    return success_response(
+        _serialize_membership(membership),
+        message="Project member role updated successfully.",
+    )
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET"])
+def project_workflow_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    states = list(project.workflow_states.all())
+    if not states:
+        states_data = [
+            {"key": key, "name": label, "is_initial": key == "TODO", "is_final": key == "DONE"}
+            for key, label in Task.Status.choices
+        ]
+        transitions_data = [
+            {"from": source, "to": target}
+            for source, targets in {
+                "BACKLOG": ["TODO"],
+                "TODO": ["IN_PROGRESS"],
+                "IN_PROGRESS": ["REVIEW"],
+                "REVIEW": ["DONE", "IN_PROGRESS"],
+                "DONE": ["REVIEW"],
+            }.items()
+            for target in targets
+        ]
+        return success_response({"states": states_data, "transitions": transitions_data})
+
+    transitions = WorkflowTransition.objects.filter(
+        from_state__project=project
+    ).select_related("from_state", "to_state")
+    return success_response({
+        "states": [
+            {
+                "key": state.key,
+                "name": state.name,
+                "is_initial": state.is_initial,
+                "is_final": state.is_final,
+            }
+            for state in states
+        ],
+        "transitions": [
+            {"from": transition.from_state.key, "to": transition.to_state.key}
+            for transition in transitions
+        ],
+    })
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["PUT"])
+def project_workflow_update_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to configure this project workflow.", status=403)
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    states = body.get("states")
+    initial_state = body.get("initial_state")
+    final_state = body.get("final_state")
+    transitions = body.get("transitions")
+    if not isinstance(states, list) or not states or not isinstance(initial_state, str) or not isinstance(final_state, str):
+        return error_response("states, initial_state, and final_state are required.", status=400)
+    if not isinstance(transitions, list):
+        return error_response("transitions must be an array.", status=400)
+    if not all(isinstance(state, str) for state in states):
+        return error_response("Each workflow state must be a string.", status=400)
+    transition_lines = []
+    for transition in transitions:
+        if isinstance(transition, str):
+            transition_lines.append(transition)
+        elif (
+            isinstance(transition, dict)
+            and isinstance(transition.get("from"), str)
+            and isinstance(transition.get("to"), str)
+            and transition["from"].strip()
+            and transition["to"].strip()
+        ):
+            transition_lines.append(f"{transition['from']} -> {transition['to']}")
+        else:
+            return error_response("Each transition must be 'State -> State' or an object with from/to.", status=400)
+
+    form = WorkflowConfigurationForm(
+        {
+            "states": "\n".join(states),
+            "initial_state": initial_state,
+            "final_state": final_state,
+            "transitions": "\n".join(transition_lines),
+        },
+        project=project,
+    )
+    if not form.is_valid():
+        return error_response("Workflow validation failed.", status=400, errors=form.errors.get_json_data())
+
+    try:
+        with transaction.atomic():
+            project.workflow_states.update(is_initial=False, is_final=False)
+            for existing_state in project.workflow_states.all():
+                existing_state.name = f"__pending_{existing_state.key}__"
+                existing_state.save(update_fields=["name"])
+            state_objects = {}
+            for position, state_data in enumerate(form.workflow_states):
+                state, _ = WorkflowState.objects.update_or_create(
+                    project=project,
+                    key=state_data["key"],
+                    defaults={
+                        "name": state_data["name"],
+                        "position": position,
+                        "is_initial": state_data["is_initial"],
+                        "is_final": state_data["is_final"],
+                    },
+                )
+                state_objects[state.key] = state
+            WorkflowTransition.objects.filter(from_state__project=project).delete()
+            WorkflowTransition.objects.bulk_create([
+                WorkflowTransition(
+                    from_state=state_objects[source],
+                    to_state=state_objects[target],
+                )
+                for source, target in form.workflow_transitions
+            ])
+            project.workflow_states.exclude(key__in=state_objects).delete()
+    except ValidationError as exc:
+        return error_response("Workflow validation failed.", status=400, errors={"workflow": exc.messages})
+    states = list(project.workflow_states.all())
+    transitions = WorkflowTransition.objects.filter(
+        from_state__project=project
+    ).select_related("from_state", "to_state")
+    return success_response({
+        "states": [
+            {
+                "key": state.key,
+                "name": state.name,
+                "is_initial": state.is_initial,
+                "is_final": state.is_final,
+            }
+            for state in states
+        ],
+        "transitions": [
+            {"from": transition.from_state.key, "to": transition.to_state.key}
+            for transition in transitions
+        ],
+    })
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET", "POST"])
 def sprint_list_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
     except Project.DoesNotExist:
         return error_response("Project not found or access denied.", status=404)
 
+    if request.method == "POST":
+        if not can_manage_project(request.user, project):
+            return error_response("You do not have permission to manage sprints.", status=403)
+        body, error = _read_api_json(request)
+        if error:
+            return error
+        required = ("name", "start_date", "end_date")
+        if any(not body.get(field) for field in required):
+            return error_response("name, start_date, and end_date are required.", status=400)
+        import datetime
+        try:
+            start_date = datetime.date.fromisoformat(body["start_date"])
+            end_date = datetime.date.fromisoformat(body["end_date"])
+        except (TypeError, ValueError):
+            return error_response("start_date and end_date must use YYYY-MM-DD.", status=400)
+        name = body["name"]
+        goal = body.get("goal", "")
+        if not isinstance(name, str) or not name.strip():
+            return error_response("name must be a non-empty string.", status=400, errors={"name": ["Enter a sprint name."]})
+        if not isinstance(goal, str):
+            return error_response("goal must be a string.", status=400, errors={"goal": ["Enter text."]})
+        sprint = Sprint(
+            project=project,
+            name=name.strip(),
+            goal=goal,
+            start_date=start_date,
+            end_date=end_date,
+            status=body.get("status", Sprint.Status.PLANNED),
+            created_by=request.user,
+        )
+        try:
+            sprint.full_clean()
+            sprint.save()
+        except (ValidationError, IntegrityError) as exc:
+            if isinstance(exc, ValidationError):
+                errors = getattr(exc, "message_dict", {"__all__": exc.messages})
+            else:
+                errors = {"name": ["A sprint with this name already exists."]}
+            return error_response("Sprint validation failed.", status=400, errors=errors)
+        return success_response({
+            "id": sprint.pk, "name": sprint.name, "goal": sprint.goal,
+            "status": sprint.status, "start_date": sprint.start_date.isoformat(),
+            "end_date": sprint.end_date.isoformat(),
+        }, status=201)
+
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "start_after", "start_before", "end_after", "end_before"},
+    )
+    if error:
+        return error
     sprints = project.sprints.all().order_by("start_date", "pk")
+    status_filter = request.GET.get("status")
+    if status_filter:
+        if status_filter not in Sprint.Status.values:
+            return error_response("Invalid sprint status.", status=400, errors={"status": ["Choose a valid sprint status."]})
+        sprints = sprints.filter(status=status_filter)
+    for parameter, field, lookup in (
+        ("start_after", "start_date", "gte"),
+        ("start_before", "start_date", "lte"),
+        ("end_after", "end_date", "gte"),
+        ("end_before", "end_date", "lte"),
+    ):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            sprints = sprints.filter(**{f"{field}__{lookup}": value})
+    page_data, error = paginate_queryset(request, sprints.order_by("start_date", "pk"))
+    if error:
+        return error
+    page, metadata = page_data
     data = [
         {
             "id": s.pk,
@@ -262,29 +899,213 @@ def sprint_list_api(request, project_id):
             "end_date": s.end_date.isoformat() if s.end_date else None,
             "task_count": s.tasks.count(),
         }
-        for s in sprints
+        for s in page.object_list
     ]
-    return success_response({"sprints": data, "count": len(data)})
+    return success_response({"sprints": data, **metadata})
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
+def sprint_detail_api(request, project_id, sprint_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    sprint = project.sprints.filter(pk=sprint_id).first()
+    if sprint is None:
+        return error_response("Sprint not found.", status=404)
+    if request.method == "GET":
+        return success_response({
+            "id": sprint.pk, "name": sprint.name, "goal": sprint.goal,
+            "status": sprint.status, "start_date": sprint.start_date.isoformat(),
+            "end_date": sprint.end_date.isoformat(), "task_count": sprint.tasks.count(),
+        })
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage sprints.", status=403)
+    if request.method == "DELETE":
+        if sprint.tasks.exists():
+            return error_response("A sprint with assigned tasks cannot be deleted.", status=400)
+        sprint.delete()
+        return success_response({"deleted_sprint_id": sprint_id}, message="Sprint deleted successfully.")
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    allowed = {"name", "goal", "start_date", "end_date", "status"}
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        return error_response("Unknown sprint fields.", status=400, errors={"fields": unknown})
+    import datetime
+    try:
+        if "start_date" in body:
+            sprint.start_date = datetime.date.fromisoformat(body["start_date"])
+        if "end_date" in body:
+            sprint.end_date = datetime.date.fromisoformat(body["end_date"])
+    except (TypeError, ValueError):
+        return error_response("start_date and end_date must use YYYY-MM-DD.", status=400)
+    for field in ("name", "goal", "status"):
+        if field in body:
+            if not isinstance(body[field], str):
+                return error_response(
+                    f"{field} must be a string.",
+                    status=400,
+                    errors={field: ["Enter text."]},
+                )
+            setattr(sprint, field, body[field])
+    try:
+        sprint.full_clean()
+        sprint.save()
+    except ValidationError as exc:
+        return error_response("Sprint validation failed.", status=400, errors=getattr(exc, "message_dict", {"__all__": exc.messages}))
+    return success_response({
+        "id": sprint.pk, "name": sprint.name, "goal": sprint.goal,
+        "status": sprint.status, "start_date": sprint.start_date.isoformat(),
+        "end_date": sprint.end_date.isoformat(), "task_count": sprint.tasks.count(),
+    })
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET", "POST"])
 def milestone_list_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
     except Project.DoesNotExist:
         return error_response("Project not found or access denied.", status=404)
 
-    milestones = project.milestones.all().order_by("due_date", "pk")
+    if request.method == "POST":
+        if not can_manage_project(request.user, project):
+            return error_response("You do not have permission to manage milestones.", status=403)
+        body, error = _read_api_json(request)
+        if error:
+            return error
+        name_value = body.get("name")
+        if not isinstance(name_value, str):
+            return error_response("name must be a string.", status=400, errors={"name": ["Enter a milestone name."]})
+        name = name_value.strip()
+        if not name:
+            return error_response("name is required.", status=400)
+        target_date = body.get("target_date")
+        if target_date:
+            import datetime
+            try:
+                target_date = datetime.date.fromisoformat(target_date)
+            except (TypeError, ValueError):
+                return error_response("target_date must use YYYY-MM-DD.", status=400)
+        milestone = Milestone(
+            project=project,
+            name=name,
+            description=body.get("description", ""),
+            target_date=target_date,
+            status=body.get("status", Milestone.Status.PLANNED),
+        )
+        if not isinstance(milestone.description, str):
+            return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
+        try:
+            milestone.full_clean()
+            milestone.save()
+        except (ValidationError, IntegrityError) as exc:
+            errors = getattr(exc, "message_dict", {"__all__": exc.messages}) if isinstance(exc, ValidationError) else {"name": ["A milestone with this name already exists."]}
+            return error_response("Milestone validation failed.", status=400, errors=errors)
+        return success_response({
+            "id": milestone.pk, "name": milestone.name, "description": milestone.description,
+            "target_date": milestone.target_date.isoformat() if milestone.target_date else None,
+            "status": milestone.status,
+        }, status=201)
+
+    error = validate_query_parameters(
+        request,
+        {"page", "page_size", "status", "target_after", "target_before"},
+    )
+    if error:
+        return error
+    milestones = project.milestones.all().order_by("target_date", "pk")
+    status_filter = request.GET.get("status")
+    if status_filter:
+        if status_filter not in Milestone.Status.values:
+            return error_response("Invalid milestone status.", status=400, errors={"status": ["Choose a valid milestone status."]})
+        milestones = milestones.filter(status=status_filter)
+    for parameter, lookup in (("target_after", "gte"), ("target_before", "lte")):
+        value, error = parse_query_date(request, parameter)
+        if error:
+            return error
+        if value:
+            milestones = milestones.filter(**{f"target_date__{lookup}": value})
+    page_data, error = paginate_queryset(request, milestones.order_by("target_date", "pk"))
+    if error:
+        return error
+    page, metadata = page_data
     data = [
         {
             "id": m.pk,
             "name": m.name,
             "description": m.description,
-            "due_date": m.due_date.isoformat() if m.due_date else None,
+            "target_date": m.target_date.isoformat() if m.target_date else None,
             "task_count": m.tasks.count(),
         }
-        for m in milestones
+        for m in page.object_list
     ]
-    return success_response({"milestones": data, "count": len(data)})
+    return success_response({"milestones": data, **metadata})
+
+
+@csrf_exempt
+@api_auth_required
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
+def milestone_detail_api(request, project_id, milestone_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    milestone = project.milestones.filter(pk=milestone_id).first()
+    if milestone is None:
+        return error_response("Milestone not found.", status=404)
+    if request.method == "GET":
+        return success_response({
+            "id": milestone.pk, "name": milestone.name, "description": milestone.description,
+            "target_date": milestone.target_date.isoformat() if milestone.target_date else None,
+            "status": milestone.status, "task_count": milestone.tasks.count(),
+        })
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage milestones.", status=403)
+    if request.method == "DELETE":
+        if milestone.tasks.exists():
+            return error_response("A milestone with assigned tasks cannot be deleted.", status=400)
+        milestone.delete()
+        return success_response({"deleted_milestone_id": milestone_id}, message="Milestone deleted successfully.")
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    allowed = {"name", "description", "target_date", "status"}
+    unknown = sorted(set(body) - allowed)
+    if unknown:
+        return error_response("Unknown milestone fields.", status=400, errors={"fields": unknown})
+    if "target_date" in body:
+        import datetime
+        try:
+            milestone.target_date = (
+                datetime.date.fromisoformat(body["target_date"])
+                if body["target_date"]
+                else None
+            )
+        except (TypeError, ValueError):
+            return error_response("target_date must use YYYY-MM-DD.", status=400)
+    for field in ("name", "description", "status"):
+        if field in body:
+            if not isinstance(body[field], str):
+                return error_response(
+                    f"{field} must be a string.",
+                    status=400,
+                    errors={field: ["Enter text."]},
+                )
+            setattr(milestone, field, body[field])
+    try:
+        milestone.full_clean()
+        milestone.save()
+    except (ValidationError, IntegrityError) as exc:
+        errors = getattr(exc, "message_dict", {"__all__": exc.messages}) if isinstance(exc, ValidationError) else {"name": ["A milestone with this name already exists."]}
+        return error_response("Milestone validation failed.", status=400, errors=errors)
+    return success_response({
+        "id": milestone.pk, "name": milestone.name, "description": milestone.description,
+        "target_date": milestone.target_date.isoformat() if milestone.target_date else None,
+        "status": milestone.status, "task_count": milestone.tasks.count(),
+    })

@@ -320,6 +320,8 @@ class TaskBackendModelAndLabelTests(TestCase):
         )
         self.assertIsNone(task.completed_at)
 
+        task.status = Task.Status.REVIEW
+        task.save(update_fields={"status"})
         task.status = Task.Status.DONE
         task.save(update_fields={"status"})
         task.refresh_from_db()

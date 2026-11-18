@@ -9,6 +9,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 
+from api.throttling import throttle_api_request
 from projects.permissions import can_manage_project, visible_projects_for
 
 from .audit import changes_from_form, record_audit
@@ -28,6 +29,9 @@ def _api_login_required(view):
     def wrapped(request, *args, **kwargs):
         if not request.user.is_authenticated:
             return JsonResponse({"error": "Authentication is required."}, status=401)
+        throttled_response = throttle_api_request(request, user=request.user)
+        if throttled_response:
+            return throttled_response
         return view(request, *args, **kwargs)
 
     return wrapped

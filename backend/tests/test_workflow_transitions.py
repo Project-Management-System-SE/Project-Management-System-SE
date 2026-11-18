@@ -35,7 +35,9 @@ class WorkflowTransitionTests(TestCase):
 
     def test_default_valid_transitions(self):
         self.assertTrue(is_valid_transition(self.project, "TODO", "IN_PROGRESS"))
-        self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "DONE"))
+        self.assertFalse(is_valid_transition(self.project, "IN_PROGRESS", "DONE"))
+        self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "REVIEW"))
+        self.assertTrue(is_valid_transition(self.project, "REVIEW", "DONE"))
         self.assertTrue(is_valid_transition(self.project, "IN_PROGRESS", "TODO"))
         self.assertTrue(is_valid_transition(self.project, "DONE", "IN_PROGRESS"))
 
@@ -59,4 +61,20 @@ class WorkflowTransitionTests(TestCase):
             is_allowed=True,
             description="Fast track allowed",
         )
-        self.assertTrue(is_valid_transition(self.project, "TODO", "DONE"))
+        self.assertFalse(is_valid_transition(self.project, "TODO", "DONE"))
+
+    def test_custom_project_workflow_must_enter_review_before_done(self):
+        ProjectWorkflowTransition.objects.create(
+            project=self.project,
+            from_status="TODO",
+            to_status="IN_REVIEW",
+            is_allowed=True,
+        )
+        ProjectWorkflowTransition.objects.create(
+            project=self.project,
+            from_status="IN_REVIEW",
+            to_status="DONE",
+            is_allowed=True,
+        )
+        self.assertFalse(is_valid_transition(self.project, "TODO", "DONE"))
+        self.assertTrue(is_valid_transition(self.project, "IN_REVIEW", "DONE"))
