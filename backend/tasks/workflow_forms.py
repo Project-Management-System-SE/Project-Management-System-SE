@@ -157,33 +157,45 @@ class WorkflowConfigurationForm(forms.Form):
         if not transitions:
             self.add_error("transitions", "Add at least one allowed transition.")
 
-        review_names = {
-            state["name"].casefold()
-            for state in states
-            if state["key"] in {"REVIEW", "IN_REVIEW", "QA", "QUALITY_ASSURANCE"}
-            or "review" in state["name"].casefold()
-            or state["name"].casefold() in {"qa", "quality assurance"}
-        }
-        final_name_key = final_name.casefold() if final_name else ""
-        if final_name_key:
-            for source_key, target_key in transitions:
-                if target_key in states_by_name.values() and states_by_name.get(final_name_key) == target_key:
-                    source_name = next(
-                        (state["name"] for state in states if state["key"] == source_key),
-                        None,
-                    )
-                    if source_name and source_name.casefold() not in review_names:
-                        self.add_error(
-                            "transitions",
-                            "Tasks must enter Review before they can transition to the final state.",
-                        )
-                        break
-            if not review_names:
+        review_key = states_by_name.get("review")
+        final_key = states_by_name.get(final_name.casefold())
+        if review_key is None:
+            self.add_error(
+                "states",
+                "A workflow must include a Review state before tasks can be completed.",
+            )
+        if review_key and final_key:
+            final_sources = {
+                source for source, target in transitions if target == final_key
+            }
+            if review_key not in final_sources:
                 self.add_error(
-                    "states",
-                    "A custom workflow must include a Review state.",
+                    "transitions",
+                    "The final state must be reachable from Review.",
+                )
+            if final_sources - {review_key}:
+                self.add_error(
+                    "transitions",
+                    "Tasks may enter the final state only from Review.",
                 )
 
+            if initial_state:
+                initial_key = states_by_name.get(initial_state.casefold())
+                outgoing = {}
+                for source, target in transitions:
+                    outgoing.setdefault(source, set()).add(target)
+                reachable = {initial_key}
+                pending = [initial_key]
+                while pending:
+                    current = pending.pop()
+                    for target in outgoing.get(current, set()) - reachable:
+                        reachable.add(target)
+                        pending.append(target)
+                if review_key not in reachable:
+                    self.add_error(
+                        "transitions",
+                        "The Review state must be reachable from the initial state.",
+                    )
         if states and not self.errors:
             state_keys = {state["key"] for state in states}
             used_states = self.project.tasks.values_list(

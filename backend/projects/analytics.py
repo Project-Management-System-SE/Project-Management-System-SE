@@ -32,15 +32,19 @@ def build_sprint_burndown(sprint, today=None):
     span_days = max((end_date - start_date).days, 1)
     observed_days = (current_date - start_date).days
     stride = max(1, ceil(span_days / 60))
-    offsets = list(range(0, observed_days + 1, stride))
-    if not offsets or offsets[-1] != observed_days:
-        offsets.append(observed_days)
+    observed_offsets = list(range(0, observed_days + 1, stride))
+    if not observed_offsets or observed_offsets[-1] != observed_days:
+        observed_offsets.append(observed_days)
+
+    ideal_offsets = list(range(0, span_days + 1, stride))
+    if not ideal_offsets or ideal_offsets[-1] != span_days:
+        ideal_offsets.append(span_days)
 
     completed_effort = Decimal("0")
     completion_events = sorted(completed_effort_by_date.items())
     completion_event_index = 0
     points = []
-    for offset in offsets:
+    for offset in observed_offsets:
         point_date = start_date + timedelta(days=offset)
         while (
             completion_event_index < len(completion_events)
@@ -49,27 +53,42 @@ def build_sprint_burndown(sprint, today=None):
             completed_effort += completion_events[completion_event_index][1]
             completion_event_index += 1
         remaining_effort = max(total_effort - completed_effort, Decimal("0"))
-        ideal_remaining = total_effort * Decimal(span_days - offset) / Decimal(span_days)
-        x = 10 + (280 * offset / span_days)
         if total_effort:
-            ideal_y = 10 + (90 * (total_effort - ideal_remaining) / total_effort)
             actual_y = 10 + (90 * (total_effort - remaining_effort) / total_effort)
         else:
-            ideal_y = actual_y = 100
+            actual_y = 100
         points.append(
             {
-                "ideal": f"{x:.2f},{ideal_y:.2f}",
-                "actual": f"{x:.2f},{actual_y:.2f}",
+                "x": 10 + (280 * offset / span_days),
+                "actual_y": actual_y,
                 "remaining_effort": remaining_effort,
             }
         )
+
+    ideal_points = []
+    for offset in ideal_offsets:
+        if total_effort:
+            ideal_remaining = (
+                total_effort * Decimal(span_days - offset) / Decimal(span_days)
+            )
+            ideal_y = 10 + (90 * (total_effort - ideal_remaining) / total_effort)
+        else:
+            ideal_y = 100
+        x = 10 + (280 * offset / span_days)
+        ideal_points.append(f"{x:.2f},{ideal_y:.2f}")
+
+    current_point = points[-1]
 
     return {
         "has_estimates": bool(total_effort),
         "total_effort": total_effort,
         "current_remaining_effort": points[-1]["remaining_effort"],
-        "ideal_points": " ".join(point["ideal"] for point in points),
-        "actual_points": " ".join(point["actual"] for point in points),
+        "ideal_points": " ".join(ideal_points),
+        "actual_points": " ".join(
+            f"{point['x']:.2f},{point['actual_y']:.2f}" for point in points
+        ),
+        "actual_current_x": f"{current_point['x']:.2f}",
+        "actual_current_y": f"{current_point['actual_y']:.2f}",
         "start_label": start_date.strftime("%b %d"),
         "current_label": current_date.strftime("%b %d"),
         "end_label": end_date.strftime("%b %d"),

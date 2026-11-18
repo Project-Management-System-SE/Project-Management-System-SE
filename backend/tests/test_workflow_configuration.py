@@ -143,13 +143,14 @@ class WorkflowConfigurationTests(TestCase):
 
     def workflow_payload(self, **overrides):
         payload = {
-            "states": "Open\nIn Development\nQA\nReleased",
+            "states": "Open\nIn Development\nQA\nReview\nReleased",
             "initial_state": "Open",
             "final_state": "Released",
             "transitions": (
                 "Open -> In Development\n"
                 "In Development -> QA\n"
-                "QA -> Released\n"
+                "QA -> Review\n"
+                "Review -> Released\n"
                 "In Development -> Open"
             ),
         }
@@ -173,10 +174,11 @@ class WorkflowConfigurationTests(TestCase):
                 ("OPEN", "Open", True, False),
                 ("IN_DEVELOPMENT", "In Development", False, False),
                 ("QA", "QA", False, False),
+                ("REVIEW", "Review", False, False),
                 ("RELEASED", "Released", False, True),
             ],
         )
-        self.assertEqual(WorkflowTransition.objects.count(), 4)
+        self.assertEqual(WorkflowTransition.objects.count(), 5)
         board = self.client.get(self.board_url())
         self.assertEqual(
             [column["value"] for column in board.context["board_columns"]],
@@ -216,7 +218,7 @@ class WorkflowConfigurationTests(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.workflow_state.key, "OPEN")
 
-        for state_key in ("IN_DEVELOPMENT", "QA", "RELEASED"):
+        for state_key in ("IN_DEVELOPMENT", "QA", "REVIEW", "RELEASED"):
             response = self.client.post(status_url, {"status": state_key})
             self.assertEqual(response.status_code, 302)
             task.refresh_from_db()
@@ -256,7 +258,7 @@ class WorkflowConfigurationTests(TestCase):
         response = self.client.post(
             self.workflow_url(),
             self.workflow_payload(
-                states="Open\nIn Development\nQA\nReleased",
+                states="Open\nIn Development\nQA\nReview\nReleased",
             ),
         )
         self.assertEqual(response.status_code, 200)

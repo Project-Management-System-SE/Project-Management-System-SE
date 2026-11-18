@@ -384,17 +384,17 @@ class TaskStatusViewTests(TestCase):
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, Task.Status.DONE)
 
-    def test_unassigned_member_cannot_update_status(self):
+    def test_unassigned_project_member_can_update_status(self):
         self.client.force_login(self.member)
 
         response = self.client.post(
             self.status_url(),
-            {"status": Task.Status.DONE},
+            {"status": Task.Status.IN_PROGRESS},
         )
 
-        self.assertEqual(response.status_code, 403)
+        self.assertRedirects(response, self.task_detail_url())
         self.task.refresh_from_db()
-        self.assertEqual(self.task.status, Task.Status.TODO)
+        self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
 
     def test_invalid_status_is_rejected_without_changing_task(self):
         self.client.force_login(self.assignee)

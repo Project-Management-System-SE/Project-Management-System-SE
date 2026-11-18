@@ -14,6 +14,12 @@ urlpatterns = [
     path("accounts/login/", account_views.LoginView.as_view(), name="login"),
     path("accounts/logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("accounts/register/", account_views.register, name="register"),
+    path("people/", account_views.people_management, name="people-management"),
+    path(
+        "people/<int:user_id>/toggle-active/",
+        account_views.employee_toggle_active,
+        name="employee-toggle-active",
+    ),
     path(
         "api/v1/session/projects/",
         task_api.api_project_list,

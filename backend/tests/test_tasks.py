@@ -741,6 +741,41 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertContains(response, "Confidential task details")
         self.assertContains(response, "security")
 
+    def test_project_member_can_edit_task_not_assigned_to_them(self):
+        self.task.assignee = self.owner
+        self.task.save(update_fields=["assignee"])
+        edit_url = reverse(
+            "tasks:task-update",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        )
+        self.client.force_login(self.member)
+
+        edit_page = self.client.get(edit_url)
+        self.assertEqual(edit_page.status_code, 200)
+        response = self.client.post(
+            edit_url,
+            {
+                "title": "Updated by project member",
+                "description": self.task.description,
+                "priority": self.task.priority,
+                "due_date": "",
+                "estimated_effort": "",
+                "actual_effort": "",
+                "sprint": "",
+                "milestone": "",
+                "assignee": str(self.owner.pk),
+                "status": Task.Status.TODO,
+                "labels": self.task.get_labels_as_string(),
+            },
+        )
+
+        self.assertRedirects(response, reverse(
+            "tasks:task-detail",
+            kwargs={"project_id": self.project.pk, "task_id": self.task.pk},
+        ))
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.title, "Updated by project member")
+
     def test_task_delete_confirmation_does_not_delete_until_post(self):
         self.client.force_login(self.owner)
         delete_url = reverse(

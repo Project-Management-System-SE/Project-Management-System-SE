@@ -1,14 +1,15 @@
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import views as auth_views
+from django.contrib.auth import get_user_model, views as auth_views
 from django.contrib.auth.forms import AuthenticationForm
+from django.core.exceptions import PermissionDenied
 from django.core.mail import send_mail
 from django.db import transaction
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import RegistrationForm
 from .models import User
@@ -21,6 +22,19 @@ class EmailLoginForm(AuthenticationForm):
         self.fields["username"].widget.input_type = "email"
         self.fields["username"].widget.attrs["autocomplete"] = "username"
         self.fields["password"].widget.attrs["autocomplete"] = "current-password"
+
+    def clean_username(self):
+        username = self.cleaned_data["username"].strip()
+        if not username:
+            return username
+
+        user_model = get_user_model()
+        return (
+            user_model.objects.filter(email__iexact=username)
+            .values_list("email", flat=True)
+            .first()
+            or username
+        )
 
 
 class LoginView(auth_views.LoginView):
@@ -75,6 +89,55 @@ def register(request):
         form = RegistrationForm()
 
     return render(request, "registration/register.html", {"form": form})
+
+
+def people_management(request):
+    if not request.user.is_authenticated:
+        return redirect("login")
+    if not request.user.is_admin:
+        raise PermissionDenied
+
+    if request.method == "POST":
+        form = RegistrationForm(request.POST)
+        if form.is_valid():
+            employee = form.save()
+            messages.success(
+                request,
+                f"Employee account created for {employee.full_name}. "
+                "Share the initial password with them securely.",
+            )
+            return redirect("people-management")
+    else:
+        form = RegistrationForm()
+
+    people = User.objects.order_by("full_name", "email")
+    return render(
+        request,
+        "accounts/people_management.html",
+        {"form": form, "people": people},
+    )
+
+
+@require_POST
+def employee_toggle_active(request, user_id):
+    if not request.user.is_authenticated:
+        return redirect("login")
+    if not request.user.is_admin:
+        raise PermissionDenied
+
+    employee = get_object_or_404(User, pk=user_id)
+    if employee.is_admin:
+        messages.error(
+            request,
+            "Administrator accounts cannot be deactivated from employee management.",
+        )
+        return redirect("people-management")
+
+    employee.is_active = not employee.is_active
+    employee.save(update_fields=["is_active"])
+    status = "activated" if employee.is_active else "deactivated"
+    messages.success(request, f"{employee.full_name} has been {status}.")
+    return redirect("people-management")
 
 
 @require_GET

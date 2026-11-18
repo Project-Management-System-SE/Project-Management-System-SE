@@ -12,6 +12,7 @@ class TaskAdmin(admin.ModelAdmin):
     list_display = ("title", "project", "status", "assignee", "priority", "due_date")
     list_filter = ("status", "priority", "project")
     search_fields = ("title", "description", "project__name", "assignee__email")
+    readonly_fields = ("status", "workflow_state", "completed_at")
 
     def save_model(self, request, obj, form, change):
         previous = Task.objects.get(pk=obj.pk) if change else None

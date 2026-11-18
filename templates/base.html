@@ -55,6 +55,14 @@
                             Tasks
                         </a>
                     </li>
+                    {% if user.is_admin %}
+                    <li>
+                        <a class="navigation-item" href="{% url 'people-management' %}"
+                            {% if request.path == "/people/" %}aria-current="page"{% endif %}>
+                            People
+                        </a>
+                    </li>
+                    {% endif %}
                 </ul>
             </nav>
         </aside>
