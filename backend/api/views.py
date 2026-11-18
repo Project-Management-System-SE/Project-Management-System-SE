@@ -2,13 +2,15 @@ import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from projects.models import Project, Sprint, Milestone
+from projects.models import Project, ProjectMembership, Sprint, Milestone
 from projects.permissions import visible_projects_for, can_manage_project
 from tasks.models import Task
 from tasks.permissions import (
@@ -244,6 +246,138 @@ def task_status_api(request, task_id):
         message = "; ".join(exc.messages)
         return error_response(message, status=400)
     return success_response(serialize_task(task), message="Task status updated successfully.")
+
+
+def _serialize_membership(membership):
+    return {
+        "id": membership.pk,
+        "project_id": membership.project_id,
+        "user": {
+            "id": membership.user_id,
+            "name": membership.user.full_name or membership.user.username,
+            "email": membership.user.email,
+        },
+        "role": membership.project_role,
+        "joined_at": membership.joined_at.isoformat(),
+    }
+
+
+def _read_api_json(request):
+    try:
+        body = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, error_response("Invalid JSON payload.", status=400)
+    if not isinstance(body, dict):
+        return None, error_response("Request body must be a JSON object.", status=400)
+    return body, None
+
+
+@api_auth_required
+@require_http_methods(["GET", "POST"])
+def project_membership_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+
+    if request.method == "GET":
+        memberships = project.memberships.select_related("user").order_by("user_id")
+        data = [_serialize_membership(membership) for membership in memberships]
+        return success_response({"members": data, "count": len(data)})
+
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage project memberships.", status=403)
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    user_id = body.get("user_id")
+    role = body.get("role")
+    if not user_id:
+        return error_response("user_id is required.", status=400)
+    if role not in ProjectMembership.Role.values:
+        return error_response(
+            f"role must be one of: {list(ProjectMembership.Role.values)}.",
+            status=400,
+        )
+    if (
+        role == ProjectMembership.Role.PROJECT_MANAGER
+        and not request.user.is_admin
+        and project.owner_id != request.user.pk
+    ):
+        return error_response("Only project owners or admins can add Project Managers.", status=403)
+
+    User = get_user_model()
+    try:
+        member = User.objects.get(pk=user_id)
+    except (User.DoesNotExist, TypeError, ValueError):
+        return error_response("User not found.", status=400)
+
+    if project.memberships.filter(user=member).exists():
+        return error_response("This user is already a project member.", status=400)
+    try:
+        membership = ProjectMembership.objects.create(
+            project=project,
+            user=member,
+            project_role=role,
+        )
+    except IntegrityError:
+        return error_response("This user is already a project member.", status=400)
+    return success_response(
+        _serialize_membership(membership),
+        status=201,
+        message="Project member added successfully.",
+    )
+
+
+@api_auth_required
+@require_http_methods(["PATCH", "DELETE"])
+def project_membership_detail_api(request, project_id, membership_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    membership = project.memberships.select_related("user").filter(pk=membership_id).first()
+    if membership is None:
+        return error_response("Project membership not found.", status=404)
+    if not can_manage_project(request.user, project):
+        return error_response("You do not have permission to manage project memberships.", status=403)
+
+    if membership.user_id == project.owner_id:
+        return error_response("The project owner's membership cannot be changed or removed.", status=400)
+
+    if request.method == "DELETE":
+        if (
+            not request.user.is_admin
+            and project.owner_id != request.user.pk
+            and membership.project_role == ProjectMembership.Role.PROJECT_MANAGER
+        ):
+            return error_response("Only project admins can remove Project Managers.", status=403)
+        membership.delete()
+        return success_response(
+            {"deleted_membership_id": membership_id},
+            message="Project member removed successfully.",
+        )
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    role = body.get("role")
+    if role not in ProjectMembership.Role.values:
+        return error_response(
+            f"role must be one of: {list(ProjectMembership.Role.values)}.",
+            status=400,
+        )
+    if (
+        role == ProjectMembership.Role.PROJECT_MANAGER
+        and not request.user.is_admin
+        and project.owner_id != request.user.pk
+    ):
+        return error_response("Only project owners or admins can assign Project Manager role.", status=403)
+    membership.project_role = role
+    membership.save(update_fields=["project_role"])
+    return success_response(
+        _serialize_membership(membership),
+        message="Project member role updated successfully.",
+    )
 
 
 @csrf_exempt
