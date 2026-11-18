@@ -13,6 +13,7 @@ urlpatterns = [
         name="notification-mark-read",
     ),
     path("tasks/", views.all_task_list, name="all-task-list"),
+    path("board/", views.kanban_board, name="kanban-board"),
     path(
         "projects/<int:project_id>/tasks/",
         views.task_list,

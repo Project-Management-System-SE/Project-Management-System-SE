@@ -868,3 +868,21 @@ progress::-moz-progress-bar { background: var(--primary); border-radius: 999px; 
 .topbar .button-secondary { background: transparent; border-color: transparent; color: var(--text); }
 .topbar .button-secondary:hover { background: var(--surface-hover); border-color: transparent; color: var(--text); }
 .topbar .button-secondary:active { background: var(--surface-3); border-color: transparent; color: var(--text); }
+
+/* Blue top navigation (Carbon UI-shell style header in Blue 60). */
+.topbar {
+    background: #0f62fe;
+    border-bottom-color: #0043ce;
+    color: #ffffff;
+}
+.topbar-heading h1 { color: #ffffff; }
+.topbar .icon-button { color: #ffffff; }
+.topbar .icon-button:hover { background: #0353e9; color: #ffffff; }
+.topbar .button-secondary { color: #ffffff; }
+.topbar .button-secondary:hover { background: #0353e9; color: #ffffff; }
+.topbar .button-secondary:active { background: #002d9c; color: #ffffff; }
+.topbar .button:not(.button-secondary) { background: #ffffff; border-color: #ffffff; color: #0f62fe; }
+.topbar .account-chip { color: #ffffff; }
+.topbar .account-avatar { background: #ffffff; color: #0f62fe; }
+.topbar :focus-visible { outline-color: #ffffff; }
+.topbar .notification-count { box-shadow: 0 0 0 2px #0f62fe; }

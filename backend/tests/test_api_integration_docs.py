@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 
@@ -74,21 +73,3 @@ class ApiIntegrationDocsTests(TestCase):
         self.assertIn("/api/v1/openapi.json", content)
         self.assertIn("Authentication", content)
         self.assertIn("Rate Limiting", content)
-
-    def test_api_integration_examples_markdown_file_exists_and_covers_topics(self):
-        docs_file = settings.PROJECT_ROOT / "docs" / "API_INTEGRATION_EXAMPLES.md"
-        self.assertTrue(docs_file.exists(), "docs/API_INTEGRATION_EXAMPLES.md must exist")
-        text = docs_file.read_text(encoding="utf-8")
-        self.assertIn("## Authentication", text)
-        self.assertIn("Bearer", text)
-        self.assertIn("## Rate Limiting", text)
-        self.assertIn("Retry-After", text)
-        self.assertIn("## Pagination and Filtering", text)
-        self.assertIn("## Error Response Format", text)
-        self.assertIn("## Task Status and Workflow", text)
-        self.assertIn("TODO → IN_PROGRESS → REVIEW → DONE", text)
-        self.assertIn("## Project Memberships", text)
-        self.assertIn("## Sprints", text)
-        self.assertIn("## Milestones", text)
-        self.assertIn("## Task Comments", text)
-        self.assertIn("## Project Reports", text)

@@ -170,8 +170,28 @@ def _render_task_detail(
 
 
 @login_required
+def kanban_board(request):
+    """Sidebar shortcut: open the Kanban board of the last viewed (or newest active) project."""
+    projects = visible_projects_for(request.user)
+    project = None
+    last_project_id = request.session.get("last_board_project_id")
+    if last_project_id:
+        project = projects.filter(pk=last_project_id).first()
+    if project is None:
+        project = (
+            projects.filter(status="ACTIVE").first()
+            or projects.exclude(status="ARCHIVED").first()
+        )
+    if project is None:
+        messages.info(request, "Create or join a project to use the Kanban board.")
+        return redirect("projects:project-list")
+    return redirect(f"{reverse('tasks:task-list', args=[project.pk])}?view=board")
+
+
+@login_required
 def task_list(request, project_id):
     project = get_object_or_404(visible_projects_for(request.user), pk=project_id)
+    request.session["last_board_project_id"] = project.pk
     tasks = (
         project.tasks.select_related(
             "assignee",
