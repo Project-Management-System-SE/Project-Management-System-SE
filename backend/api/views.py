@@ -1,4 +1,3 @@
-import json
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
@@ -9,7 +8,6 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
 
 from projects.models import Project, ProjectMembership, Sprint, Milestone
 from tasks.models import Task, TaskComment, WorkflowState, WorkflowTransition
@@ -30,9 +28,11 @@ from tasks.workflow import (
 )
 from .auth import api_auth_required
 from .helpers import (
+    api_require_http_methods,
     error_response,
     paginate_queryset,
     parse_query_date,
+    read_json_object,
     serialize_project,
     serialize_task,
     success_response,
@@ -42,7 +42,7 @@ from .helpers import (
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET"])
 def project_report_api(request, project_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -101,7 +101,7 @@ def project_report_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET"])
 def project_list_api(request):
     projects = visible_projects_for(request.user).select_related("owner")
     error = validate_query_parameters(
@@ -138,7 +138,7 @@ def project_list_api(request):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET"])
 def project_detail_api(request, project_id):
     try:
         project = visible_projects_for(request.user).select_related("owner").get(pk=project_id)
@@ -150,7 +150,7 @@ def project_detail_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def task_list_create_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
@@ -224,14 +224,27 @@ def task_list_create_api(request, project_id):
     if not can_create_task_in(request.user, project):
         return error_response("You do not have permission to create tasks in this project.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
-
-    title = (body.get("title") or "").strip()
+    body, error = read_json_object(request)
+    if error:
+        return error
+    unknown_fields = sorted(
+        set(body) - {"title", "description", "priority", "assignee_id", "due_date"}
+    )
+    if unknown_fields:
+        return error_response(
+            "Unknown task fields.",
+            status=400,
+            errors={"fields": unknown_fields},
+        )
+    title_value = body.get("title", "")
+    if not isinstance(title_value, str):
+        return error_response("title must be a string.", status=400, errors={"title": ["Enter text."]})
+    title = title_value.strip()
     if len(title) < 3:
-        return error_response("Task title must be at least 3 characters long.", status=400)
+        return error_response("Task title must be at least 3 characters long.", status=400, errors={"title": ["Ensure this field has at least 3 characters."]})
+    description = body.get("description", "")
+    if not isinstance(description, str):
+        return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
 
     priority = body.get("priority", Task.Priority.MEDIUM)
     if priority not in Task.Priority.values:
@@ -240,22 +253,26 @@ def task_list_create_api(request, project_id):
     assignee = None
     assignee_id = body.get("assignee_id")
     if assignee_id:
+        if isinstance(assignee_id, bool) or not str(assignee_id).isdecimal():
+            return error_response("assignee_id must be a positive integer.", status=400, errors={"assignee_id": ["Enter a valid user ID."]})
         from django.contrib.auth import get_user_model
         User = get_user_model()
         try:
-            assignee = User.objects.get(pk=assignee_id)
+            assignee = User.objects.get(pk=int(assignee_id))
             is_valid_assignee = (
                 project.owner_id == assignee.pk
                 or project.memberships.filter(user=assignee).exists()
             )
             if not is_valid_assignee:
                 return error_response("Selected assignee is not an active member of this project.", status=400)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, TypeError, ValueError):
             return error_response("Assignee user does not exist.", status=400)
 
     due_date = body.get("due_date")
     if due_date:
         import datetime
+        if not isinstance(due_date, str):
+            return error_response("due_date must use YYYY-MM-DD format.", status=400, errors={"due_date": ["Enter a valid date."]})
         try:
             due_date = datetime.date.fromisoformat(due_date)
             if project.start_date and due_date < project.start_date:
@@ -266,7 +283,7 @@ def task_list_create_api(request, project_id):
     task = Task.objects.create(
         project=project,
         title=title,
-        description=body.get("description", ""),
+        description=description,
         priority=priority,
         status=Task.Status.TODO,
         assignee=assignee,
@@ -278,7 +295,7 @@ def task_list_create_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "PATCH", "DELETE"])
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
 def task_detail_api(request, task_id):
     try:
         task = Task.objects.select_related("project", "assignee").get(pk=task_id)
@@ -301,18 +318,30 @@ def task_detail_api(request, task_id):
     if not can_edit_task(request.user, task):
         return error_response("You do not have permission to edit this task.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
+    body, error = read_json_object(request)
+    if error:
+        return error
+    unknown_fields = sorted(
+        set(body) - {"title", "description", "priority", "assignee_id"}
+    )
+    if unknown_fields:
+        return error_response(
+            "Unknown task fields.",
+            status=400,
+            errors={"fields": unknown_fields},
+        )
 
     if "title" in body:
+        if not isinstance(body["title"], str):
+            return error_response("title must be a string.", status=400, errors={"title": ["Enter text."]})
         title = body["title"].strip()
         if len(title) < 3:
             return error_response("Task title must be at least 3 characters long.", status=400)
         task.title = title
 
     if "description" in body:
+        if not isinstance(body["description"], str):
+            return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
         task.description = body["description"]
 
     if "priority" in body:
@@ -323,6 +352,10 @@ def task_detail_api(request, task_id):
 
     if "assignee_id" in body:
         new_assignee_id = body["assignee_id"]
+        if new_assignee_id is not None and (
+            isinstance(new_assignee_id, bool) or not str(new_assignee_id).isdecimal()
+        ):
+            return error_response("assignee_id must be a positive integer or null.", status=400, errors={"assignee_id": ["Enter a valid user ID."]})
         if new_assignee_id != task.assignee_id and not can_reassign_task(request.user, task):
             return error_response("You do not have permission to reassign this task.", status=403)
         if new_assignee_id:
@@ -331,18 +364,25 @@ def task_detail_api(request, task_id):
             try:
                 new_assignee = User.objects.get(pk=new_assignee_id)
                 task.assignee = new_assignee
-            except User.DoesNotExist:
+            except (User.DoesNotExist, TypeError, ValueError):
                 return error_response("Assignee user does not exist.", status=400)
         else:
             task.assignee = None
 
-    task.save()
+    try:
+        task.save()
+    except ValidationError as exc:
+        return error_response(
+            "Task validation failed.",
+            status=400,
+            errors=getattr(exc, "message_dict", {"__all__": exc.messages}),
+        )
     return success_response(serialize_task(task), message="Task updated successfully.")
 
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["POST"])
+@api_require_http_methods(["POST"])
 def task_status_api(request, task_id):
     try:
         task = Task.objects.select_related("project").get(pk=task_id)
@@ -355,10 +395,9 @@ def task_status_api(request, task_id):
     if not can_edit_task(request.user, task):
         return error_response("You do not have permission to update status for this task.", status=403)
 
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except Exception:
-        return error_response("Invalid JSON payload.", status=400)
+    body, error = read_json_object(request)
+    if error:
+        return error
 
     new_status = body.get("status")
     valid_statuses = [value for value, _ in workflow_choices_for(task.project)]
@@ -404,7 +443,7 @@ def _serialize_comment(comment):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def task_comment_api(request, project_id, task_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -430,7 +469,10 @@ def task_comment_api(request, project_id, task_id):
     body, error = _read_api_json(request)
     if error:
         return error
-    content = (body.get("content") or "").strip()
+    content_value = body.get("content")
+    if not isinstance(content_value, str):
+        return error_response("content must be a string.", status=400, errors={"content": ["Enter text."]})
+    content = content_value.strip()
     if not content:
         return error_response("content is required.", status=400)
     comment = TaskComment.objects.create(task=task, author=request.user, content=content)
@@ -443,7 +485,7 @@ def task_comment_api(request, project_id, task_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["PATCH", "DELETE"])
+@api_require_http_methods(["PATCH", "DELETE"])
 def task_comment_detail_api(request, project_id, task_id, comment_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -468,7 +510,10 @@ def task_comment_detail_api(request, project_id, task_id, comment_id):
     body, error = _read_api_json(request)
     if error:
         return error
-    content = (body.get("content") or "").strip()
+    content_value = body.get("content")
+    if not isinstance(content_value, str):
+        return error_response("content must be a string.", status=400, errors={"content": ["Enter text."]})
+    content = content_value.strip()
     if not content:
         return error_response("content is required.", status=400)
     comment.content = content
@@ -491,17 +536,12 @@ def _serialize_membership(membership):
 
 
 def _read_api_json(request):
-    try:
-        body = json.loads(request.body.decode("utf-8") or "{}")
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, error_response("Invalid JSON payload.", status=400)
-    if not isinstance(body, dict):
-        return None, error_response("Request body must be a JSON object.", status=400)
-    return body, None
+    return read_json_object(request)
 
 
+@csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def project_membership_api(request, project_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -532,7 +572,7 @@ def project_membership_api(request, project_id):
         return error
     user_id = body.get("user_id")
     role = body.get("role")
-    if not user_id:
+    if isinstance(user_id, bool) or not str(user_id or "").isdecimal():
         return error_response("user_id is required.", status=400)
     if role not in ProjectMembership.Role.values:
         return error_response(
@@ -548,7 +588,7 @@ def project_membership_api(request, project_id):
 
     User = get_user_model()
     try:
-        member = User.objects.get(pk=user_id)
+        member = User.objects.get(pk=int(user_id))
     except (User.DoesNotExist, TypeError, ValueError):
         return error_response("User not found.", status=400)
 
@@ -569,8 +609,9 @@ def project_membership_api(request, project_id):
     )
 
 
+@csrf_exempt
 @api_auth_required
-@require_http_methods(["PATCH", "DELETE"])
+@api_require_http_methods(["PATCH", "DELETE"])
 def project_membership_detail_api(request, project_id, membership_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -622,7 +663,7 @@ def project_membership_detail_api(request, project_id, membership_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET"])
+@api_require_http_methods(["GET"])
 def project_workflow_api(request, project_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -668,7 +709,7 @@ def project_workflow_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["PUT"])
+@api_require_http_methods(["PUT"])
 def project_workflow_update_api(request, project_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -693,7 +734,13 @@ def project_workflow_update_api(request, project_id):
     for transition in transitions:
         if isinstance(transition, str):
             transition_lines.append(transition)
-        elif isinstance(transition, dict) and transition.get("from") and transition.get("to"):
+        elif (
+            isinstance(transition, dict)
+            and isinstance(transition.get("from"), str)
+            and isinstance(transition.get("to"), str)
+            and transition["from"].strip()
+            and transition["to"].strip()
+        ):
             transition_lines.append(f"{transition['from']} -> {transition['to']}")
         else:
             return error_response("Each transition must be 'State -> State' or an object with from/to.", status=400)
@@ -763,7 +810,7 @@ def project_workflow_update_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def sprint_list_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
@@ -785,10 +832,16 @@ def sprint_list_api(request, project_id):
             end_date = datetime.date.fromisoformat(body["end_date"])
         except (TypeError, ValueError):
             return error_response("start_date and end_date must use YYYY-MM-DD.", status=400)
+        name = body["name"]
+        goal = body.get("goal", "")
+        if not isinstance(name, str) or not name.strip():
+            return error_response("name must be a non-empty string.", status=400, errors={"name": ["Enter a sprint name."]})
+        if not isinstance(goal, str):
+            return error_response("goal must be a string.", status=400, errors={"goal": ["Enter text."]})
         sprint = Sprint(
             project=project,
-            name=body["name"].strip(),
-            goal=body.get("goal", ""),
+            name=name.strip(),
+            goal=goal,
             start_date=start_date,
             end_date=end_date,
             status=body.get("status", Sprint.Status.PLANNED),
@@ -853,7 +906,7 @@ def sprint_list_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "PATCH", "DELETE"])
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
 def sprint_detail_api(request, project_id, sprint_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -892,6 +945,12 @@ def sprint_detail_api(request, project_id, sprint_id):
         return error_response("start_date and end_date must use YYYY-MM-DD.", status=400)
     for field in ("name", "goal", "status"):
         if field in body:
+            if not isinstance(body[field], str):
+                return error_response(
+                    f"{field} must be a string.",
+                    status=400,
+                    errors={field: ["Enter text."]},
+                )
             setattr(sprint, field, body[field])
     try:
         sprint.full_clean()
@@ -907,7 +966,7 @@ def sprint_detail_api(request, project_id, sprint_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "POST"])
+@api_require_http_methods(["GET", "POST"])
 def milestone_list_api(request, project_id):
     try:
         project = visible_projects_for(request.user).get(pk=project_id)
@@ -920,7 +979,10 @@ def milestone_list_api(request, project_id):
         body, error = _read_api_json(request)
         if error:
             return error
-        name = (body.get("name") or "").strip()
+        name_value = body.get("name")
+        if not isinstance(name_value, str):
+            return error_response("name must be a string.", status=400, errors={"name": ["Enter a milestone name."]})
+        name = name_value.strip()
         if not name:
             return error_response("name is required.", status=400)
         target_date = body.get("target_date")
@@ -937,6 +999,8 @@ def milestone_list_api(request, project_id):
             target_date=target_date,
             status=body.get("status", Milestone.Status.PLANNED),
         )
+        if not isinstance(milestone.description, str):
+            return error_response("description must be a string.", status=400, errors={"description": ["Enter text."]})
         try:
             milestone.full_clean()
             milestone.save()
@@ -986,7 +1050,7 @@ def milestone_list_api(request, project_id):
 
 @csrf_exempt
 @api_auth_required
-@require_http_methods(["GET", "PATCH", "DELETE"])
+@api_require_http_methods(["GET", "PATCH", "DELETE"])
 def milestone_detail_api(request, project_id, milestone_id):
     project = visible_projects_for(request.user).filter(pk=project_id).first()
     if project is None:
@@ -1027,6 +1091,12 @@ def milestone_detail_api(request, project_id, milestone_id):
             return error_response("target_date must use YYYY-MM-DD.", status=400)
     for field in ("name", "description", "status"):
         if field in body:
+            if not isinstance(body[field], str):
+                return error_response(
+                    f"{field} must be a string.",
+                    status=400,
+                    errors={field: ["Enter text."]},
+                )
             setattr(milestone, field, body[field])
     try:
         milestone.full_clean()

@@ -1,6 +1,6 @@
-from django.http import JsonResponse
 from functools import wraps
 
+from .helpers import error_response
 from .throttling import throttle_api_request
 
 
@@ -20,10 +20,7 @@ def api_auth_required(view_func):
                 throttled_response = throttle_api_request(request)
                 if throttled_response:
                     return throttled_response
-                return JsonResponse(
-                    {"status": "error", "message": "Invalid or expired API token."},
-                    status=401,
-                )
+                return error_response("Invalid or expired API token.", status=401)
             request.user = api_token.user
             throttled_response = throttle_api_request(request, user=api_token.user)
             if throttled_response:
@@ -44,19 +41,16 @@ def api_auth_required(view_func):
             throttled_response = throttle_api_request(request, user=request.user)
             if throttled_response:
                 return throttled_response
-            return JsonResponse(
-                {
-                    "status": "error",
-                    "message": "An API token is required for unsafe requests.",
-                },
+            return error_response(
+                "An API token is required for unsafe requests.",
                 status=403,
             )
 
         throttled_response = throttle_api_request(request)
         if throttled_response:
             return throttled_response
-        return JsonResponse(
-            {"status": "error", "message": "Authentication required. Provide a valid Bearer token or session."},
+        return error_response(
+            "Authentication required. Provide a valid Bearer token or session.",
             status=401,
         )
 

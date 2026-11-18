@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal
 from django.core.paginator import EmptyPage, PageNotAnInteger, Paginator
 from django.http import JsonResponse
+from functools import wraps
 
 
 def success_response(data, status=200, message=None):
@@ -13,10 +14,45 @@ def success_response(data, status=200, message=None):
 
 
 def error_response(message, status=400, errors=None):
-    payload = {"status": "error", "message": message}
-    if errors:
-        payload["errors"] = errors
+    payload = {
+        "status": "error",
+        "message": message,
+        "errors": errors or {},
+    }
     return JsonResponse(payload, status=status)
+
+
+def api_require_http_methods(allowed_methods):
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapped(request, *args, **kwargs):
+            if request.method not in allowed_methods:
+                response = error_response("Method not allowed.", status=405)
+                response["Allow"] = ", ".join(allowed_methods)
+                return response
+            return view_func(request, *args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def read_json_object(request):
+    if request.content_type != "application/json":
+        return None, error_response(
+            "Content-Type must be application/json.",
+            status=415,
+        )
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None, error_response("Request body is not valid JSON.", status=400)
+    if not isinstance(payload, dict):
+        return None, error_response(
+            "Request body must be a JSON object.",
+            status=400,
+        )
+    return payload, None
 
 
 def paginate_queryset(request, queryset, *, default_page_size=25, max_page_size=100):
