@@ -7,6 +7,13 @@
 <h1>{% firstof page_heading form_heading "Task" %}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}{% if project.pk %}<li><a href="{% url 'tasks:task-list' project.pk %}">Tasks</a></li>
+{% endif %}<li><span aria-current="page">{% if task.pk %}Edit task{% else %}New task{% endif %}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="project-form-intro" aria-labelledby="task-form-heading">
     <h2 id="task-form-heading">{% firstof form_heading "Task details" %}</h2>

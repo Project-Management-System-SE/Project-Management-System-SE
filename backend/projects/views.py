@@ -197,6 +197,9 @@ def dashboard(request):
                 "task_count": unassigned_task_count,
             }
         )
+    busiest_assignee = max((row["task_count"] for row in assignee_distribution), default=0)
+    for row in assignee_distribution:
+        row["bar_percent"] = round(row["task_count"] * 100 / busiest_assignee) if busiest_assignee else 0
 
     context = {
         "total_projects": len(projects),
@@ -831,6 +834,7 @@ def project_reports(request, project_id):
     )
     velocity = get_sprint_velocity_metrics(project)
     workload = get_team_workload_metrics(project)
+    chart_data = _report_chart_data(progress, velocity, workload)
 
     return render(
         request,
@@ -841,10 +845,66 @@ def project_reports(request, project_id):
             "progress": progress,
             "velocity": velocity,
             "workload": workload,
+            **chart_data,
             "selected_sprint": selected_sprint,
             "can_manage_project": can_manage_project(request.user, project),
         },
     )
+
+
+def _percent(value, maximum):
+    """Return value as a whole-number percentage of maximum (0 when maximum is 0)."""
+    return round(float(value) * 100 / float(maximum)) if maximum else 0
+
+
+def _report_chart_data(progress, velocity, workload):
+    """Pre-compute bar widths so the reports template can draw simple CSS charts."""
+    total = progress["total_tasks"]
+    done = progress["completed_tasks"]
+    in_progress = progress["in_progress_tasks"]
+    progress_segments = {
+        "done_percent": _percent(done, total),
+        "progress_percent": _percent(in_progress, total),
+        "other_percent": max(0, 100 - _percent(done, total) - _percent(in_progress, total)) if total else 0,
+        "other_tasks": max(0, total - done - in_progress),
+    }
+
+    sprint_rows = velocity["sprints"]
+    sprint_max = max(
+        [row["estimated_effort"] for row in sprint_rows]
+        + [row["known_estimated_effort"] or 0 for row in sprint_rows],
+        default=0,
+    )
+    sprint_chart = [
+        {
+            "name": row["name"],
+            "status": row["status"],
+            "estimated": row["estimated_effort"],
+            "completed": row["known_estimated_effort"] or 0,
+            "estimated_percent": _percent(row["estimated_effort"], sprint_max),
+            "completed_percent": _percent(row["known_estimated_effort"] or 0, sprint_max),
+        }
+        for row in sprint_rows
+    ]
+
+    workload_max = max((row["total_tasks"] for row in workload), default=0)
+    workload_chart = [
+        {
+            "name": row["name"],
+            "total": row["total_tasks"],
+            "active": row["active_tasks"],
+            "completed": row["completed_tasks"],
+            "completed_percent": _percent(row["completed_tasks"], workload_max),
+            "active_percent": _percent(row["active_tasks"], workload_max),
+        }
+        for row in workload
+        if row["total_tasks"]
+    ]
+    return {
+        "progress_segments": progress_segments,
+        "sprint_chart": sprint_chart,
+        "workload_chart": workload_chart,
+    }
 
 
 @login_required

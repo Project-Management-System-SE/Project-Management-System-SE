@@ -6,109 +6,181 @@
 <h1>{{ project.name }}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+<li><span aria-current="page">{{ project.name }}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro" aria-labelledby="project-detail-heading">
     <div>
-        <h2 id="project-detail-heading">Project details</h2>
-        <p>{{ project.get_status_display }}</p>
+        <span class="section-eyebrow">Project details</span>
+        <h2 id="project-detail-heading">{{ project.name }}</h2>
+        <div class="page-header-meta">
+            <span class="status status-neutral{% if project.status == 'ACTIVE' %} status-active{% elif project.status == 'COMPLETED' %} status-complete{% elif project.status == 'ARCHIVED' %} status-archived{% elif project.status == 'ON_HOLD' %} status-on-hold{% endif %}">{{ project.get_status_display }}</span>
+            <span>Owned by {{ project.owner.full_name|default:project.owner.email }}</span>
+        </div>
     </div>
     <div class="project-form-actions">
-        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}">View tasks</a>
-        <a class="button button-secondary" href="{% url 'projects:project-activity' project.pk %}">Activity history</a>
-        <a class="button button-secondary" href="{% url 'projects:sprint-list' project.pk %}">Planning</a>
-                {% if can_manage_project %}
-        <a href="{% url 'projects:project-reports' project.id %}" class="btn btn-secondary">Project Reports</a>
-        <a href="{% url 'projects:project-workflow-settings' project.id %}" class="btn btn-secondary">Workflow Rules</a>
-        {% endif %}
+        <a class="button button-secondary" href="{% url 'tasks:task-list' project.pk %}?view=board">View tasks</a>
         {% if can_manage_project %}
-        <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create task</a>
         <a class="button button-secondary" href="{% url 'projects:project-update' project.pk %}">Edit project</a>
-        <a class="button button-secondary" href="{% url 'tasks:workflow-configure' project.pk %}">Configure workflow</a>
-        {% if project.status != "ARCHIVED" %}
-        <form method="post" action="{% url 'projects:project-archive' project.pk %}">
-            {% csrf_token %}
-            <button class="button button-secondary" type="submit">Archive project</button>
-        </form>
-        {% endif %}
-        <a class="button button-secondary" href="{% url 'projects:project-delete' project.pk %}">Delete project</a>
+        <a class="button" href="{% url 'tasks:task-create' project.pk %}">Create task</a>
         {% endif %}
     </div>
 </section>
 
-<section class="card" aria-labelledby="project-summary-heading">
-    <h2 id="project-summary-heading">Summary</h2>
-    <p>{{ project.description|default:"No description provided." }}</p>
-    <p>
-        <strong>Start date:</strong>
-        {% if project.start_date %}{{ project.start_date|date:"M j, Y" }}{% else %}Not set{% endif %}
-    </p>
-    <p>
-        <strong>Due date:</strong>
-        {% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}
-    </p>
-    <p><strong>Owner:</strong> {{ project.owner.full_name|default:project.owner.email }}</p>
-</section>
+<div class="detail-layout">
+    <div class="detail-main">
+        <section class="card" aria-labelledby="project-summary-heading">
+            <h2 id="project-summary-heading">Summary</h2>
+            <p>{{ project.description|default:"No description provided." }}</p>
+        </section>
 
-<section class="card" aria-labelledby="project-reports-heading">
-    <h2 id="project-reports-heading">Download project reports</h2>
-    <ul class="project-report-links">
-        <li><a href="{% url 'projects:project-progress-report' project.pk %}">Progress summary (CSV)</a></li>
-        <li><a href="{% url 'projects:project-velocity-report' project.pk %}">Sprint velocity (CSV)</a></li>
-        <li><a href="{% url 'projects:project-workload-report' project.pk %}">Team workload (CSV)</a></li>
-    </ul>
-</section>
+        <nav aria-label="Project sections">
+            <ul class="quick-links">
+                <li>
+                    <a class="quick-link" href="{% url 'tasks:task-list' project.pk %}?view=board">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4" width="5" height="16" rx="1.4" stroke="currentColor" stroke-width="1.8"/><rect x="9.5" y="4" width="5" height="11" rx="1.4" stroke="currentColor" stroke-width="1.8"/><rect x="15.5" y="4" width="5" height="7" rx="1.4" stroke="currentColor" stroke-width="1.8"/></svg>
+                        <span>Kanban board<small>Move tasks through the workflow</small></span>
+                    </a>
+                </li>
+                <li>
+                    <a class="quick-link" href="{% url 'projects:sprint-list' project.pk %}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><rect x="3.5" y="5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M3.5 9.5h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        <span>Planning<small>Sprints and milestones</small></span>
+                    </a>
+                </li>
+                <li>
+                    <a class="quick-link" href="{% url 'projects:project-activity' project.pk %}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M3 12h4l3-7 4 14 3-7h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <span>Activity history<small>Audit log of every change</small></span>
+                    </a>
+                </li>
+                {% if can_manage_project %}
+                <li>
+                    <a class="quick-link" href="{% url 'projects:project-reports' project.id %}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M21 20H3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        <span>Project Reports<small>Charts and analytics</small></span>
+                    </a>
+                </li>
+                <li>
+                    <a class="quick-link" href="{% url 'projects:project-workflow-settings' project.id %}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="18" r="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 6H14a4 4 0 0 1 0 8h-4a4 4 0 0 0 0 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" transform="translate(0 -2)"/></svg>
+                        <span>Workflow Rules<small>Allowed status transitions</small></span>
+                    </a>
+                </li>
+                <li>
+                    <a class="quick-link" href="{% url 'tasks:workflow-configure' project.pk %}">
+                        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" stroke="currentColor" stroke-width="1.5"/></svg>
+                        <span>Configure workflow<small>Custom states per project</small></span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
 
-<section class="card" aria-labelledby="project-members-heading">
-    <h2 id="project-members-heading">Project members</h2>
-    {% if memberships %}
-    <ul class="projects-list">
-        {% for membership in memberships %}
-        <li class="project-list-card">
-            <div class="project-list-heading">
-                <span>{{ membership.user.full_name|default:membership.user.email }}</span>
-                <span class="status status-neutral">{{ membership.get_project_role_display }}</span>
+        <section class="card" aria-labelledby="project-members-heading">
+            <div class="section-card-header">
+                <h2 id="project-members-heading">Project members</h2>
+                <span class="badge badge-primary">{{ memberships|length }} member{{ memberships|length|pluralize }}</span>
             </div>
-            {% if can_manage_project and membership.user_id != project.owner_id %}
-            <form method="post" action="{% url 'projects:project-remove-member' project.pk membership.pk %}">
+            {% if memberships %}
+            <ul class="member-list">
+                {% for membership in memberships %}
+                <li>
+                    <span class="account-avatar" aria-hidden="true">{{ membership.user.full_name|default:membership.user.email|slice:":1"|upper }}</span>
+                    <span class="member-name">
+                        <span>{{ membership.user.full_name|default:membership.user.email }}</span>
+                        <small>{{ membership.user.email }}</small>
+                    </span>
+                    <span class="status status-neutral">{{ membership.get_project_role_display }}</span>
+                    {% if can_manage_project and membership.user_id != project.owner_id %}
+                    <form method="post" action="{% url 'projects:project-remove-member' project.pk membership.pk %}"
+                        data-confirm="Remove {{ membership.user.full_name|default:membership.user.email }} from {{ project.name }}?">
+                        {% csrf_token %}
+                        <button class="button button-ghost button-sm" type="submit">Remove member</button>
+                    </form>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>No members have been added to this project.</p>
+            {% endif %}
+        </section>
+    </div>
+
+    <aside class="detail-aside">
+        <section class="card" aria-labelledby="project-dates-heading">
+            <h2 id="project-dates-heading">Schedule</h2>
+            <dl class="meta-list">
+                <div>
+                    <dt>Start date:</dt>
+                    <dd>{% if project.start_date %}{{ project.start_date|date:"M j, Y" }}{% else %}Not set{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>Due date:</dt>
+                    <dd>{% if project.due_date %}{{ project.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</dd>
+                </div>
+                <div>
+                    <dt>Owner:</dt>
+                    <dd>{{ project.owner.full_name|default:project.owner.email }}</dd>
+                </div>
+            </dl>
+        </section>
+
+        <section class="card" aria-labelledby="project-reports-heading">
+            <h2 id="project-reports-heading">Download project reports</h2>
+            <ul class="project-report-links">
+                <li><a href="{% url 'projects:project-progress-report' project.pk %}">Progress summary (CSV)</a></li>
+                <li><a href="{% url 'projects:project-velocity-report' project.pk %}">Sprint velocity (CSV)</a></li>
+                <li><a href="{% url 'projects:project-workload-report' project.pk %}">Team workload (CSV)</a></li>
+            </ul>
+        </section>
+
+        {% if can_manage_project %}
+        <section class="card project-form" aria-labelledby="add-member-heading">
+            <h2 id="add-member-heading">Add a project member</h2>
+            {% if member_form.user.field.queryset %}
+            <form method="post" action="{% url 'projects:project-add-member' project.pk %}">
                 {% csrf_token %}
-                <button class="button button-secondary" type="submit">Remove member</button>
+                {% for field in member_form %}
+                <div class="form-field">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                    <div class="field-errors" role="alert">{{ field.errors }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+                {% if member_form.non_field_errors %}
+                <div class="form-errors" role="alert">{{ member_form.non_field_errors }}</div>
+                {% endif %}
+                <div class="project-form-actions">
+                    <button type="submit">Add member</button>
+                </div>
             </form>
+            {% else %}
+            <p class="text-muted">There are no eligible users to add.</p>
             {% endif %}
-        </li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <p>No members have been added to this project.</p>
-    {% endif %}
-</section>
+        </section>
 
-{% if can_manage_project %}
-<section class="card project-form" aria-labelledby="add-member-heading">
-    <h2 id="add-member-heading">Add a project member</h2>
-    {% if member_form.user.field.queryset %}
-    <form method="post" action="{% url 'projects:project-add-member' project.pk %}">
-        {% csrf_token %}
-        {% for field in member_form %}
-        <div class="form-field">
-            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-            {{ field }}
-            {% if field.errors %}
-            <div class="field-errors" role="alert">{{ field.errors }}</div>
-            {% endif %}
-        </div>
-        {% endfor %}
-        {% if member_form.non_field_errors %}
-        <div class="form-errors" role="alert">{{ member_form.non_field_errors }}</div>
+        <section class="card danger-zone" aria-labelledby="danger-zone-heading">
+            <h2 id="danger-zone-heading">Danger zone</h2>
+            <p>Archiving hides the project from active lists. Deleting removes it permanently.</p>
+            <div class="project-form-actions">
+                {% if project.status != "ARCHIVED" %}
+                <form method="post" action="{% url 'projects:project-archive' project.pk %}"
+                    data-confirm="Archive {{ project.name }}? It will be hidden from active project lists.">
+                    {% csrf_token %}
+                    <button class="button button-secondary" type="submit">Archive project</button>
+                </form>
+                {% endif %}
+                <a class="button button-danger-outline" href="{% url 'projects:project-delete' project.pk %}">Delete project</a>
+            </div>
+        </section>
         {% endif %}
-        <div class="project-form-actions">
-            <button type="submit">Add member</button>
-        </div>
-    </form>
-    {% else %}
-    <p>There are no eligible users to add.</p>
-    {% endif %}
-</section>
-{% endif %}
-
-<p><a href="{% url 'projects:project-list' %}">Back to projects</a></p>
+    </aside>
+</div>
 {% endblock %}

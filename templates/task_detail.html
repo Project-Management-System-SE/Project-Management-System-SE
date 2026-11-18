@@ -6,6 +6,13 @@
 <h1>{{ task.title }}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}{% if project.pk %}<li><a href="{% url 'tasks:task-list' project.pk %}">Tasks</a></li>
+{% endif %}<li><span aria-current="page">{{ task.title }}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro task-detail-intro" aria-labelledby="task-detail-heading">
     <div>

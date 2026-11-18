@@ -6,6 +6,12 @@
 <h1>Configure workflow</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}<li><span aria-current="page">Configure workflow</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro">
     <div>

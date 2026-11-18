@@ -939,7 +939,7 @@ class TaskViewAndPermissionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["view_mode"], "board")
         self.assertEqual(list(response.context["tasks"]), [])
-        self.assertContains(response, "No tasks in this status.")
+        self.assertContains(response, "No tasks here yet")
         self.assertContains(response, "Clear filters")
 
     def test_invalid_assignee_filter_is_rejected(self):

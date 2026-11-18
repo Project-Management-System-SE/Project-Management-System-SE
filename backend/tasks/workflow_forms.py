@@ -2,7 +2,7 @@ from django import forms
 from django.utils.text import slugify
 
 from .models import Task, WorkflowTransition
-from .workflow import STATUS_TRANSITIONS, workflow_states_for
+from .workflow import STATUS_TRANSITIONS, is_review_state, workflow_states_for
 
 
 class WorkflowConfigurationForm(forms.Form):
@@ -157,23 +157,27 @@ class WorkflowConfigurationForm(forms.Form):
         if not transitions:
             self.add_error("transitions", "Add at least one allowed transition.")
 
-        review_key = states_by_name.get("review")
         final_key = states_by_name.get(final_name.casefold())
-        if review_key is None:
+        review_keys = {
+            state["key"]
+            for state in states
+            if state["key"] != final_key and is_review_state(state["key"], state["name"])
+        }
+        if not review_keys:
             self.add_error(
                 "states",
-                "A workflow must include a Review state before tasks can be completed.",
+                "A workflow must include a Review (or QA) state before tasks can be completed.",
             )
-        if review_key and final_key:
+        if review_keys and final_key:
             final_sources = {
                 source for source, target in transitions if target == final_key
             }
-            if review_key not in final_sources:
+            if not final_sources & review_keys:
                 self.add_error(
                     "transitions",
                     "The final state must be reachable from Review.",
                 )
-            if final_sources - {review_key}:
+            if final_sources - review_keys:
                 self.add_error(
                     "transitions",
                     "Tasks may enter the final state only from Review.",
@@ -191,7 +195,7 @@ class WorkflowConfigurationForm(forms.Form):
                     for target in outgoing.get(current, set()) - reachable:
                         reachable.add(target)
                         pending.append(target)
-                if review_key not in reachable:
+                if not reachable & review_keys:
                     self.add_error(
                         "transitions",
                         "The Review state must be reachable from the initial state.",

@@ -1,5 +1,11 @@
 name: Render CD
 
+# Deploys to Render only after the full "Django CI Pipeline" succeeds for a push to main.
+# Requires (GitHub → Settings → Environments → production):
+#   secret   RENDER_DEPLOY_HOOK_URL  – Render → service → Settings → Deploy Hook
+#   variable PRODUCTION_URL          – e.g. https://pms-web-gall.onrender.com (optional, enables the health check)
+# In Render, set Auto-Deploy to "Off" so this workflow is the only path to production.
+
 on:
   workflow_run:
     workflows: ["Django CI Pipeline"]
@@ -23,14 +29,35 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
+      url: ${{ vars.PRODUCTION_URL }}
     steps:
       - name: Trigger Render deployment
         env:
           RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
         run: |
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Configure RENDER_DEPLOY_HOOK_URL in the production environment."
+            echo "::error title=Missing secret::Add RENDER_DEPLOY_HOOK_URL to the GitHub 'production' environment (Render → Settings → Deploy Hook)."
             exit 1
           fi
           curl --fail-with-body --silent --show-error \
             --request POST "$RENDER_DEPLOY_HOOK_URL"
+          echo "Deployment requested for commit ${{ github.event.workflow_run.head_sha }}."
+
+      - name: Wait for the new release to report healthy
+        if: ${{ vars.PRODUCTION_URL != '' }}
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          # Render builds take a few minutes; poll /health/ for up to 15 minutes.
+          sleep 90
+          for attempt in $(seq 1 28); do
+            status=$(curl --silent --output /dev/null --write-out "%{http_code}" --max-time 60 "$PRODUCTION_URL/health/" || true)
+            echo "Attempt $attempt: /health/ returned $status"
+            if [ "$status" = "200" ]; then
+              echo "Production is healthy."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error title=Health check failed::$PRODUCTION_URL/health/ did not return 200. Check the Render deploy logs."
+          exit 1

@@ -14,7 +14,7 @@ This specification details the role-based and project-level authorization rules 
    - User assigned the `TEAM_MEMBER` role via `ProjectMembership`.
    - Authorized to view all tasks in the project.
    - Authorized to create tasks in projects where they have active membership.
-   - Authorized to edit tasks where they are either the designated `assignee` or `created_by`.
+   - Authorized to edit task content and move tasks across the board for any task in a project they belong to (SRS §6.5: "tasks assigned to them or within projects they belong to").
    - Cannot reassign tasks to other team members without managerial privileges.
    - Cannot delete tasks.
 5. **Non-Member / Anonymous User**:
@@ -29,8 +29,8 @@ This specification details the role-based and project-level authorization rules 
 | **View Task List** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403/404) |
 | **View Task Details** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403/404) |
 | **Create Task** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (403) |
-| **Edit Task Content** | Allowed | Allowed | Allowed | Allowed | Denied | Denied (403) |
-| **Update Task Status** | Allowed | Allowed | Allowed | Allowed | Denied | Denied (403) |
+| **Edit Task Content** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (404) |
+| **Update Task Status** | Allowed | Allowed | Allowed | Allowed | Allowed | Denied (404) |
 | **Reassign Task** | Allowed | Allowed | Denied | Denied | Denied | Denied (403) |
 | **Delete Task** | Allowed | Allowed | Denied | Denied | Denied | Denied (403) |
 

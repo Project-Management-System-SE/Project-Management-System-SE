@@ -3,6 +3,13 @@
 {% block title %}{{ sprint.name }} | PMS{% endblock %}
 {% block page_heading %}<h1>{{ sprint.name }}</h1>{% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}{% if project.pk %}<li><a href="{% url 'projects:sprint-list' project.pk %}">Planning</a></li>
+{% endif %}<li><span aria-current="page">{{ sprint.name }}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro">
     <div>
@@ -22,7 +29,8 @@
         <a class="button" href="{% url 'projects:sprint-update' project.pk sprint.pk %}">Edit sprint</a>
         {% endif %}
         {% if sprint.status == "ACTIVE" %}
-        <form method="post" action="{% url 'projects:sprint-close' project.pk sprint.pk %}">
+        <form class="sprint-close-form" method="post" action="{% url 'projects:sprint-close' project.pk sprint.pk %}"
+            data-confirm="Close {{ sprint.name }}? Incomplete tasks will be carried over and velocity will be finalised.">
             {% csrf_token %}
             <label for="carry-over-sprint">Carry incomplete tasks to</label>
             <select id="carry-over-sprint" name="carry_over_sprint">

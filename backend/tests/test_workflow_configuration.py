@@ -182,7 +182,7 @@ class WorkflowConfigurationTests(TestCase):
         board = self.client.get(self.board_url())
         self.assertEqual(
             [column["value"] for column in board.context["board_columns"]],
-            ["OPEN", "IN_DEVELOPMENT", "QA", "RELEASED"],
+            ["OPEN", "IN_DEVELOPMENT", "QA", "REVIEW", "RELEASED"],
         )
 
     def test_custom_workflow_controls_task_creation_and_server_transitions(self):

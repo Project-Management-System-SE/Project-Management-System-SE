@@ -7,6 +7,12 @@
 <h1>Tasks for {{ project.name }}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+<li><span aria-current="page">{% if view_mode == 'board' %}Board{% else %}Tasks{% endif %}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro" aria-labelledby="tasks-list-heading">
     <div>
@@ -73,36 +79,41 @@
                 <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
                 <div class="kanban-card-badges">
                     <span class="priority-value priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span>
-                    <span class="kanban-assignee">
-                        {% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}
-                    </span>
-                </div>
-                <p class="kanban-card-due">
-                    <span>Due</span>
-                    <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong>
-                </p>
-                <p class="task-board-effort">
-                    Estimate: {% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %};
-                    Actual: {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}
-                </p>
-                {% if task.labels.all %}
-                <div class="task-labels-list">
                     {% for label in task.labels.all %}
                     <span class="task-label">{{ label.name }}</span>
                     {% endfor %}
                 </div>
-                {% endif %}
+                <div class="kanban-card-footer">
+                    <span class="kanban-assignee">
+                        {% if task.assignee %}
+                        <span class="task-person-avatar" aria-hidden="true">{{ task.assignee.full_name|default:task.assignee.email|first|upper }}</span>
+                        {{ task.assignee.full_name|default:task.assignee.email }}
+                        {% else %}Unassigned{% endif %}
+                    </span>
+                    <p class="kanban-card-due">
+                        <span class="visually-hidden">Due</span>
+                        <strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}No due date{% endif %}</strong>
+                    </p>
+                </div>
+                <p class="task-board-effort">
+                    Estimate: {% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %}
+                    &middot;
+                    Actual: {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}
+                </p>
                 {% if task.can_update_status %}
-                <form class="kanban-move-form task-board-status-form" method="post"
-                    action="{% url 'tasks:task-update-status' project.pk task.pk %}"
-                    data-task-status-form>
-                    {% csrf_token %}
-                    <div class="form-field">
-                        <label for="{{ task.status_form.status.id_for_label }}">Move {{ task.title }} to</label>
-                        {{ task.status_form.status }}
-                    </div>
-                    <button type="submit">Save status</button>
-                </form>
+                <details class="kanban-card-move">
+                    <summary>Move</summary>
+                    <form class="kanban-move-form task-board-status-form" method="post"
+                        action="{% url 'tasks:task-update-status' project.pk task.pk %}"
+                        data-task-status-form>
+                        {% csrf_token %}
+                        <div class="form-field">
+                            <label for="{{ task.status_form.status.id_for_label }}">Move {{ task.title }} to</label>
+                            {{ task.status_form.status }}
+                        </div>
+                        <button type="submit">Save status</button>
+                    </form>
+                </details>
                 {% endif %}
             </article>
             {% empty %}
@@ -116,7 +127,7 @@
 <p class="visually-hidden" data-kanban-announcement aria-live="polite"></p>
 {% else %}
 {% if tasks %}
-<section class="task-table-shell" aria-label="Project task list">
+<section class="card task-table-shell" aria-label="Project task list">
     <div class="task-table-scroll" tabindex="0" aria-label="Scrollable task table">
         <table class="task-list-table">
             <thead>
@@ -127,6 +138,7 @@
                     <th scope="col">Priority</th>
                     <th scope="col">Status</th>
                     <th scope="col">Due date</th>
+                    <th scope="col">Estimate / Actual</th>
                     <th scope="col">Sprint</th>
                 </tr>
             </thead>
@@ -153,6 +165,7 @@
                         </span>
                     </td>
                     <td>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}<span class="task-table-muted">—</span>{% endif %}</td>
+                    <td>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}<span class="task-table-muted">—</span>{% endif %} / {% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}<span class="task-table-muted">—</span>{% endif %}</td>
                     <td>{% if task.sprint %}{{ task.sprint.name }}{% else %}<span class="task-table-muted">Backlog</span>{% endif %}</td>
                 </tr>
                 {% endfor %}

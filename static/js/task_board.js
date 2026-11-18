@@ -26,9 +26,9 @@
         count.textContent = cards.length;
         let emptyState = list.querySelector(".task-board-empty");
         if (cards.length === 0 && !emptyState) {
-            emptyState = document.createElement("li");
-            emptyState.className = "task-board-empty";
-            emptyState.textContent = "No tasks in this status.";
+            emptyState = document.createElement("p");
+            emptyState.className = "kanban-column-empty task-board-empty";
+            emptyState.textContent = "No tasks here yet";
             list.appendChild(emptyState);
         } else if (cards.length > 0 && emptyState) {
             emptyState.remove();

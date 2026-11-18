@@ -6,6 +6,13 @@
 <h1>Delete task</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}{% if project.pk %}<li><a href="{% url 'tasks:task-list' project.pk %}">Tasks</a></li>
+{% endif %}<li><span aria-current="page">Delete task</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="card" aria-labelledby="delete-task-heading">
     <h2 id="delete-task-heading">Delete “{{ task.title }}”?</h2>
@@ -13,7 +20,7 @@
     <form method="post">
         {% csrf_token %}
         <div class="project-form-actions">
-            <button type="submit">Confirm delete</button>
+            <button class="button button-danger" type="submit">Confirm delete</button>
             <a class="button button-secondary" href="{% url 'tasks:task-detail' project.pk task.pk %}">
                 Cancel
             </a>

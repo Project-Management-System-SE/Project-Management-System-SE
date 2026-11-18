@@ -1,0 +1,41 @@
+# Render Blueprint for the PMS web service and its PostgreSQL database.
+# Documents the production setup in code. Render applies it when the service is
+# created or synced from Render → Blueprints; otherwise use it as the reference
+# for the values entered in the Render dashboard.
+#
+# Deployments are triggered by .github/workflows/deploy-render.yml after CI passes,
+# so auto-deploy is turned off here.
+
+services:
+  - type: web
+    name: pms-web
+    runtime: python
+    plan: free
+    rootDir: backend
+    autoDeploy: false
+    buildCommand: python -m pip install -r requirements.txt && python manage.py collectstatic --noinput
+    startCommand: python manage.py migrate --noinput && python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    healthCheckPath: /health/
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false            # e.g. pms-web-gall.onrender.com (RENDER_EXTERNAL_HOSTNAME is also added automatically)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pms-db
+          property: connectionString
+      - key: DJANGO_EMAIL_BACKEND
+        sync: false            # set to the SMTP backend plus DJANGO_EMAIL_* values for real e-mail
+      - key: DJANGO_SECURE_HSTS_SECONDS
+        value: "31536000"
+
+databases:
+  - name: pms-db
+    plan: free
+    databaseName: pms
+    user: pms

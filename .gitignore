@@ -39,3 +39,8 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Local scratch from test runs
+pytest-cache-files-*/
+.tmp-tests/
+coverage.xml

@@ -6,6 +6,10 @@
 <h1>{% if selected_project %}{{ selected_project.name }} tasks{% else %}Tasks{% endif %}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><span aria-current="page">All tasks</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro" aria-labelledby="task-list-heading">
     <div>

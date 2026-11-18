@@ -6,6 +6,12 @@
 <h1>{% if is_update %}Edit Project{% else %}Create Project{% endif %}</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}<li><span aria-current="page">{% if project.pk %}Edit{% else %}New project{% endif %}</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="project-form-intro" aria-labelledby="project-form-heading">
     <h2 id="project-form-heading">{% if is_update %}Update project details{% else %}Set up a project{% endif %}</h2>

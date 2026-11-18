@@ -11,6 +11,24 @@ STATUS_TRANSITIONS = {
 }
 
 
+REVIEW_STATE_KEYS = {"REVIEW", "IN_REVIEW", "QA", "QUALITY_ASSURANCE"}
+REVIEW_STATE_NAMES = {"qa", "quality assurance"}
+
+
+def is_review_state(key, name=""):
+    """Return True when a workflow state acts as the review step before Done.
+
+    A state counts as review when its key is a known review/QA key, its name
+    contains the word "review", or its name is "QA"/"Quality Assurance".
+    """
+    normalized_name = (name or "").strip().casefold()
+    return (
+        (key or "").upper() in REVIEW_STATE_KEYS
+        or "review" in normalized_name
+        or normalized_name in REVIEW_STATE_NAMES
+    )
+
+
 def workflow_states_for(project):
     if project is None or not project.pk:
         return []
@@ -106,9 +124,7 @@ def allowed_status_transitions(status, project=None):
         )
         final_keys = {state.key for state in states if state.is_final}
         review_keys = {
-            state.key
-            for state in states
-            if state.key == Task.Status.REVIEW or state.name.strip().casefold() == "review"
+            state.key for state in states if is_review_state(state.key, state.name)
         }
         if status not in review_keys:
             targets.difference_update(final_keys)

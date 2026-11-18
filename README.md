@@ -24,7 +24,7 @@ The system architecture follows a layered structure separating presentation, app
 - **Frontend**: HTML5, CSS, and JavaScript rendered via Django templates.
 - **Backend API**: Python / Django framework structured into modular applications (`accounts`, `projects`, `tasks`).
 - **Data Store**: Relational database (PostgreSQL in production / SQLite for local development & testing).
-- **CI/CD Pipeline**: GitHub Actions for automated linting, migration verification, and test execution.
+- **CI/CD Pipeline**: GitHub Actions runs Django checks, migration verification, the test suite on 5 OS/Python combinations, and a code + branch coverage report; Render deploys only after CI passes on `main`.
 
 ---
 
@@ -52,9 +52,11 @@ Project-Management-System/
 │   └── Requirements_Matrix.pdf
 ├── templates/              # Django HTML templates (Frontend)
 ├── static/                 # Static assets: CSS, JavaScript, and images
+├── render.yaml             # Render Blueprint: production web service + PostgreSQL
 └── .github/
     └── workflows/
-        └── tests.yml       # GitHub Actions automated test workflow
+        ├── tests.yml       # CI: checks, migrations, tests (5-job matrix), coverage report
+        └── deploy-render.yml # CD: deploys to Render after CI succeeds on main
 ```
 
 ---
@@ -162,6 +164,31 @@ export DJANGO_DEBUG=true
 
 To explicitly disable debug mode, set `DJANGO_DEBUG=false` and provide a
 `DJANGO_SECRET_KEY`.
+
+### 6. Run the tests and coverage
+
+```bash
+cd backend
+python manage.py test tests            # 355 Django tests (~20 s)
+cd .. && python -m pytest -v && cd backend   # pytest smoke tests
+python -m coverage run manage.py test tests
+python -m coverage report              # statement + branch coverage
+python -m coverage html                # open backend/htmlcov/index.html
+```
+
+## 🌐 Deployment (Render)
+
+Live site: **https://pms-web-gall.onrender.com** (free tier – the first request after idling can take ~30 s).
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `backend` |
+| Build command | `python -m pip install -r requirements.txt && python manage.py collectstatic --noinput` |
+| Start command | `python manage.py migrate --noinput && python -m gunicorn config.wsgi:application --bind 0.0.0.0:$PORT` |
+| Health check | `/health/` |
+| Environment | `DJANGO_DEBUG=false`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DATABASE_URL` (PostgreSQL) |
+
+The full configuration is in [`render.yaml`](render.yaml). Deployment flow: push to `main` → **Django CI Pipeline** passes → **Render CD** calls the Render deploy hook → waits for `/health/` to return 200. Render's own auto-deploy must be **Off** so failing code is never released. See [docs/CI_CD_PIPELINE_GUIDE.md](docs/CI_CD_PIPELINE_GUIDE.md) for the one-time setup.
 
 ### Project management
 

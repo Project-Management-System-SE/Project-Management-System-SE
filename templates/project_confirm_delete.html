@@ -6,14 +6,20 @@
 <h1>Delete project</h1>
 {% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}<li><span aria-current="page">Delete</span></li>
+{% endblock %}
+
 {% block content %}
-<section class="card" aria-labelledby="delete-project-heading">
+<section class="card danger-zone" aria-labelledby="delete-project-heading" style="max-width: 640px">
     <h2 id="delete-project-heading">Delete “{{ project.name }}”?</h2>
     <p>This permanently deletes the project and its project memberships. This action cannot be undone.</p>
     <form method="post">
         {% csrf_token %}
         <div class="project-form-actions">
-            <button type="submit">Confirm delete</button>
+            <button class="button button-danger" type="submit">Confirm delete</button>
             <a class="button button-secondary" href="{% url 'projects:project-detail' project.pk %}">
                 Cancel
             </a>

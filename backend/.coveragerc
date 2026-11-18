@@ -1,0 +1,28 @@
+# Coverage configuration (used locally and in CI).
+# Branch coverage is on, so reports show both statement and branch (decision) coverage.
+[run]
+branch = True
+source =
+    accounts
+    api
+    config
+    projects
+    tasks
+omit =
+    */migrations/*
+    */tests/*
+    config/asgi.py
+    config/wsgi.py
+    config/test_settings.py
+
+[report]
+show_missing = True
+skip_empty = True
+precision = 1
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+
+[html]
+directory = htmlcov
+title = PMS code & branch coverage

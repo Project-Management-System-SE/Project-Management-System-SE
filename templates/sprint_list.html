@@ -4,6 +4,12 @@
 
 {% block page_heading %}<h1>{{ project.name }} planning</h1>{% endblock %}
 
+{% block breadcrumbs %}
+<li><a href="{% url 'projects:project-list' %}">Projects</a></li>
+{% if project.pk %}<li><a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></li>
+{% endif %}<li><span aria-current="page">Planning</span></li>
+{% endblock %}
+
 {% block content %}
 <section class="projects-intro">
     <div>

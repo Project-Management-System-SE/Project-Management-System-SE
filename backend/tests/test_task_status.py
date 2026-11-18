@@ -89,7 +89,7 @@ class TaskStatusViewTests(TestCase):
         self.assertContains(response, "Task Assignee")
         self.assertContains(response, "High")
         self.assertContains(response, "Nov 15, 2026")
-        self.assertContains(response, "No tasks in this status.")
+        self.assertContains(response, "No tasks here yet")
         self.assertNotContains(response, 'class="kanban-move-form"')
 
     def test_board_groups_project_tasks_in_status_columns(self):
@@ -148,7 +148,10 @@ class TaskStatusViewTests(TestCase):
         self.assertContains(response, "Task Assignee")
         self.assertContains(response, "High")
         self.assertContains(response, "Nov 15, 2026")
-        self.assertNotContains(response, "Update status")
+        self.assertContains(response, "Update status")
+
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(self.task_detail_url()).status_code, 404)
 
     def test_assignee_can_update_status_and_it_persists(self):
         self.client.force_login(self.assignee)
@@ -194,7 +197,7 @@ class TaskStatusViewTests(TestCase):
         self.assertIsNotNone(self.task.completed_at)
         self.assertContains(self.client.get(self.task_list_url()), "Review")
 
-    def test_board_renders_status_controls_only_for_task_editors(self):
+    def test_board_renders_status_controls_for_project_members(self):
         self.client.force_login(self.assignee)
 
         response = self.client.get(self.board_url())
@@ -208,7 +211,10 @@ class TaskStatusViewTests(TestCase):
         response = self.client.get(self.board_url())
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'data-task-status-form')
+        self.assertContains(response, 'data-task-status-form')
+
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(self.board_url()).status_code, 404)
 
     def test_board_status_ajax_update_returns_confirmation_and_persists(self):
         self.client.force_login(self.assignee)
@@ -249,7 +255,7 @@ class TaskStatusViewTests(TestCase):
         self.assertEqual(self.task.status, Task.Status.TODO)
 
     def test_board_status_ajax_rejects_unauthorized_project_and_task_access(self):
-        self.client.force_login(self.member)
+        self.client.force_login(self.outsider)
 
         task_response = self.client.post(
             self.status_url(),
@@ -265,7 +271,7 @@ class TaskStatusViewTests(TestCase):
             HTTP_ACCEPT="application/json",
         )
 
-        self.assertEqual(task_response.status_code, 403)
+        self.assertEqual(task_response.status_code, 404)
         self.assertFalse(task_response.json()["success"])
         self.assertEqual(hidden_project_response.status_code, 404)
         self.assertFalse(hidden_project_response.json()["success"])

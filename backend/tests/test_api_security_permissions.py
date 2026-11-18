@@ -205,14 +205,25 @@ class ApiSecurityPermissionTests(TestCase):
         self.assertTrue(Sprint.objects.filter(pk=self.sprint.pk).exists())
         self.assertTrue(Milestone.objects.filter(pk=self.milestone.pk).exists())
 
-    def test_member_cannot_change_unassigned_task_status(self):
+    def test_project_member_can_change_unassigned_task_status(self):
         response = self.client.post(
             reverse("api:task-status", kwargs={"task_id": self.task.pk}),
             data=json.dumps({"status": Task.Status.IN_PROGRESS}),
             content_type="application/json",
             **self.auth(self.member_token),
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
+
+    def test_outsider_cannot_change_task_status(self):
+        response = self.client.post(
+            reverse("api:task-status", kwargs={"task_id": self.task.pk}),
+            data=json.dumps({"status": Task.Status.IN_PROGRESS}),
+            content_type="application/json",
+            **self.auth(self.outsider_token),
+        )
+        self.assertEqual(response.status_code, 404)
         self.task.refresh_from_db()
         self.assertEqual(self.task.status, Task.Status.TODO)
 
