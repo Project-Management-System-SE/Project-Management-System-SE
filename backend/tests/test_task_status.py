@@ -372,6 +372,8 @@ class TaskStatusViewTests(TestCase):
         self.assertEqual(self.task.status, Task.Status.IN_PROGRESS)
         self.assertIsNone(self.task.completed_at)
 
+        self.task.status = Task.Status.REVIEW
+        self.task.save()
         self.task.status = Task.Status.DONE
         self.task.save()
         invalid_reverse_response = self.client.post(

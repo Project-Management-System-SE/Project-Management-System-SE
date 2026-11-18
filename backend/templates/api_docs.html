@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ spec.info.title }}</title>
+  <style>
+    body { max-width: 960px; margin: 2rem auto; font-family: Arial, sans-serif; }
+    pre { background: #f4f4f4; padding: 1rem; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>{{ spec.info.title }}</h1>
+  <p>{{ spec.info.description }}</p>
+  <p>Authentication: Bearer API token or authenticated Django session. Unsafe session requests require CSRF protection.</p>
+  <h2>Endpoints</h2>
+  {% for path, operations in spec.paths.items %}
+    <h3><code>{{ path }}</code></h3>
+    {% for method, operation in operations.items %}
+      <p><strong>{{ method|upper }}</strong> - {{ operation.summary }}</p>
+      <p>Responses: {% for status, response in operation.responses.items %}<code>{{ status }}</code> {{ response.description }}; {% endfor %}</p>
+    {% endfor %}
+  {% endfor %}
+  <h2>OpenAPI JSON</h2>
+  <p><a href="{% url 'api:openapi-spec' %}">Download the OpenAPI specification</a></p>
+</body>
+</html>

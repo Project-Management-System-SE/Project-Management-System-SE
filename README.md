@@ -60,6 +60,25 @@ Project-Management-System/
 
 ---
 
+## REST API
+
+The expanded REST API is available under `/api/v1/`. Interactive endpoint documentation is available at `/api/v1/docs/`, with the machine-readable OpenAPI specification at `/api/v1/openapi.json`.
+
+Authentication supports Bearer API tokens and Django sessions. Unsafe session-authenticated requests require a valid CSRF token. Project resources are restricted to visible project members; membership and workflow changes require project owner/admin or project-manager permissions.
+
+Main endpoint groups:
+
+- Projects and project tasks
+- Project memberships
+- Custom workflow configuration
+- Sprints and milestones
+- Task comments
+- Project progress, sprint velocity, and team workload reports
+
+The API enforces that tasks enter Review (including recognized custom review/QA states) before Done. Direct Done transitions are rejected with HTTP 400 and a validation error.
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Clone Repository

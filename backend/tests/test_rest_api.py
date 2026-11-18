@@ -98,3 +98,10 @@ class RestApiTests(TestCase):
         resp = self.client.get(reverse("api:openapi-spec"))
         self.assertEqual(resp.status_code, 200)
         self.assertIn("openapi", resp.json())
+
+    def test_api_docs_viewer_and_expanded_paths(self):
+        resp = self.client.get(reverse("api:api-docs"))
+        self.assertEqual(resp.status_code, 200)
+        spec = self.client.get(reverse("api:openapi-spec")).json()
+        self.assertIn("/api/v1/projects/{project_id}/members/", spec["paths"])
+        self.assertIn("/api/v1/projects/{project_id}/reports/", spec["paths"])
