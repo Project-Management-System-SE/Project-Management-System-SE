@@ -1,6 +1,7 @@
 from django import forms
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db.models import Q
 
 from projects.models import Milestone, Sprint
@@ -18,6 +19,7 @@ from .workflow import (
     set_task_workflow_status,
     workflow_choices_for,
     workflow_states_for,
+    validate_workflow_transition,
 )
 
 User = get_user_model()
@@ -254,6 +256,20 @@ class TaskForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
+        status = cleaned_data.get("status")
+        if status and self.instance and self.instance.pk:
+            from .workflow import (
+                validate_workflow_transition,
+                workflow_status_key,
+            )
+            try:
+                validate_workflow_transition(
+                    workflow_status_key(self.instance),
+                    status,
+                    self.project,
+                )
+            except ValidationError as error:
+                self.add_error("status", str(error))
         assignee = cleaned_data.get("assignee")
         if assignee and self.project:
             is_member = (
@@ -312,6 +328,8 @@ class TaskStatusForm(forms.Form):
 
     def __init__(self, *args, current_status, project=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self._current_status = current_status
+        self._project = project
         allowed_statuses = allowed_status_transitions(
             current_status,
             project,
@@ -331,6 +349,20 @@ class TaskStatusForm(forms.Form):
                 "Tasks must pass through Review before they can be marked Done."
             )
         )
+
+    def clean_status(self):
+        status = self.cleaned_data["status"]
+        try:
+            validate_workflow_transition(
+                getattr(self, "_current_status", None),
+                status,
+                getattr(self, "_project", None),
+            )
+        except ValidationError:
+            raise forms.ValidationError(
+                "Tasks must enter Review before they can be marked Done."
+            )
+        return status
 
 
 class TaskCommentForm(forms.ModelForm):

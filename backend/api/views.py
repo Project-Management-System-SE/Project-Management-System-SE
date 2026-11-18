@@ -237,8 +237,12 @@ def task_status_api(request, task_id):
             status=400,
         )
 
-    set_task_workflow_status(task, new_status, task.project)
-    task.save()
+    try:
+        set_task_workflow_status(task, new_status, task.project)
+        task.save()
+    except ValidationError as exc:
+        message = "; ".join(exc.messages)
+        return error_response(message, status=400)
     return success_response(serialize_task(task), message="Task status updated successfully.")
 
 

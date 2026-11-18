@@ -85,8 +85,8 @@ class ProjectWorkflowTransitionTests(TestCase):
         )
         response = self.client.post(status_url, data={"status": Task.Status.DONE})
         self.task.refresh_from_db()
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(self.task.status, Task.Status.DONE)
+        self.assertEqual(response.status_code, 400)
+        self.assertNotEqual(self.task.status, Task.Status.DONE)
 
 
 @override_settings(

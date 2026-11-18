@@ -157,6 +157,33 @@ class WorkflowConfigurationForm(forms.Form):
         if not transitions:
             self.add_error("transitions", "Add at least one allowed transition.")
 
+        review_names = {
+            state["name"].casefold()
+            for state in states
+            if state["key"] in {"REVIEW", "IN_REVIEW", "QA", "QUALITY_ASSURANCE"}
+            or "review" in state["name"].casefold()
+            or state["name"].casefold() in {"qa", "quality assurance"}
+        }
+        final_name_key = final_name.casefold() if final_name else ""
+        if final_name_key:
+            for source_key, target_key in transitions:
+                if target_key in states_by_name.values() and states_by_name.get(final_name_key) == target_key:
+                    source_name = next(
+                        (state["name"] for state in states if state["key"] == source_key),
+                        None,
+                    )
+                    if source_name and source_name.casefold() not in review_names:
+                        self.add_error(
+                            "transitions",
+                            "Tasks must enter Review before they can transition to the final state.",
+                        )
+                        break
+            if not review_names:
+                self.add_error(
+                    "states",
+                    "A custom workflow must include a Review state.",
+                )
+
         if states and not self.errors:
             state_keys = {state["key"] for state in states}
             used_states = self.project.tasks.values_list(

@@ -3,7 +3,8 @@ from projects.permissions import can_manage_project
 
 DEFAULT_WORKFLOW_TRANSITIONS = {
     "TODO": ["IN_PROGRESS"],
-    "IN_PROGRESS": ["DONE", "TODO"],
+    "IN_PROGRESS": ["IN_REVIEW", "TODO"],
+    "IN_REVIEW": ["DONE", "IN_PROGRESS"],
     "DONE": ["IN_PROGRESS"],
 }
 
@@ -50,6 +51,8 @@ def is_valid_transition(project, from_status, to_status, user=None):
     to_status = _legacy_status(to_status)
     if from_status == to_status:
         return True
+    if to_status == "DONE" and from_status not in {"REVIEW", "IN_REVIEW"}:
+        return False
     if from_status == "BACKLOG" and to_status == "TODO":
         return True
 

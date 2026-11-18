@@ -438,6 +438,15 @@ class Task(models.Model):
     def save(self, *args, **kwargs):
         if self.title:
             self.title = self.title.strip()
+        previous_status = None
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "status",
+                "workflow_state__key",
+            ).first()
+            if previous:
+                previous_status = previous["workflow_state__key"] or previous["status"]
+
         if self.project_id and not self.workflow_state_id:
             self.workflow_state = WorkflowState.objects.filter(
                 project_id=self.project_id,
@@ -456,6 +465,15 @@ class Task(models.Model):
             from .workflow import task_status_for_workflow_state
 
             self.status = task_status_for_workflow_state(self.workflow_state)
+
+        if self.pk and previous_status:
+            from .workflow import validate_workflow_transition, workflow_status_key
+
+            validate_workflow_transition(
+                previous_status,
+                workflow_status_key(self),
+                self.project,
+            )
 
         is_complete = (
             self.workflow_state.is_final
