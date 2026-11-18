@@ -66,10 +66,19 @@ def set_task_workflow_status(task, status_key, project):
 def allowed_status_transitions(status, project=None):
     states = workflow_states_for(project)
     if states:
-        return set(
+        targets = set(
             WorkflowTransition.objects.filter(
                 from_state__project=project,
                 from_state__key=status,
             ).values_list("to_state__key", flat=True)
         )
+        final_keys = {state.key for state in states if state.is_final}
+        review_keys = {
+            state.key
+            for state in states
+            if state.key == Task.Status.REVIEW or state.name.strip().casefold() == "review"
+        }
+        if status not in review_keys:
+            targets.difference_update(final_keys)
+        return targets
     return STATUS_TRANSITIONS.get(status, set())

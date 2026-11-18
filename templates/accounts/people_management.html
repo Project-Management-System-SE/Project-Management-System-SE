@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}People | Fieldwork{% endblock %}
+
+{% block page_heading %}
+<h1>People</h1>
+{% endblock %}
+
+{% block content %}
+<section class="projects-intro" aria-labelledby="people-intro-heading">
+    <div>
+        <h2 id="people-intro-heading">Manage employee accounts</h2>
+        <p>Create employee accounts here, then add each person to a project to give them access to its tasks and comments.</p>
+    </div>
+</section>
+
+<section class="card project-form" aria-labelledby="create-employee-heading">
+    <h2 id="create-employee-heading">Add an employee</h2>
+    <p>Set an initial password and share it with the employee through a secure channel.</p>
+    <form method="post" action="{% url 'people-management' %}" autocomplete="off">
+        {% csrf_token %}
+        {% if form.non_field_errors %}
+        <div class="form-errors" role="alert">{{ form.non_field_errors }}</div>
+        {% endif %}
+        {% for field in form %}
+        <div class="form-field">
+            <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="field-help">{{ field.help_text }}</div>{% endif %}
+            {% if field.errors %}<div class="field-errors" role="alert">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="project-form-actions">
+            <button type="submit">Create employee account</button>
+        </div>
+    </form>
+</section>
+
+<section class="card" aria-labelledby="people-list-heading">
+    <h2 id="people-list-heading">Workspace accounts</h2>
+    <div class="assignee-table-wrapper">
+        <table class="assignee-table">
+            <thead>
+                <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Account type</th>
+                    <th scope="col">Status</th>
+                    <th scope="col"><span class="visually-hidden">Account action</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for person in people %}
+                <tr>
+                    <th scope="row">{{ person.full_name|default:person.username }}</th>
+                    <td>{{ person.email }}</td>
+                    <td>{% if person.is_admin %}Administrator{% else %}Employee{% endif %}</td>
+                    <td>
+                        <span class="status status-neutral{% if person.is_active %} status-active{% else %} status-archived{% endif %}">
+                            {% if person.is_active %}Active{% else %}Deactivated{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {% if not person.is_admin %}
+                        <form method="post" action="{% url 'employee-toggle-active' person.pk %}">
+                            {% csrf_token %}
+                            {% if person.is_active %}
+                            <button class="button button-secondary" type="submit">Deactivate</button>
+                            {% else %}
+                            <button class="button button-secondary" type="submit">Reactivate</button>
+                            {% endif %}
+                        </form>
+                        {% elif person.pk == user.pk %}
+                        <span class="field-help">You</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5">No accounts found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="field-help">Deactivating an employee blocks sign-in while preserving their task history. Manage project access from the project details page.</p>
+</section>
+{% endblock %}

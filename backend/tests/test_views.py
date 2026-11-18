@@ -960,6 +960,15 @@ class LoginViewTests(TestCase):
         dashboard_response = self.client.get(reverse("projects:dashboard"))
         self.assertTrue(dashboard_response.wsgi_request.user.is_authenticated)
 
+    def test_login_email_is_case_insensitive(self):
+        response = self.client.post(
+            reverse("login"),
+            {"username": self.email.upper(), "password": self.password},
+        )
+
+        self.assertRedirects(response, reverse("projects:dashboard"))
+        self.assertEqual(self.client.session["_auth_user_id"], str(self.user.pk))
+
     def test_login_keeps_session_for_thirty_days_without_a_checkbox(self):
         response = self.client.post(
             reverse("login"),

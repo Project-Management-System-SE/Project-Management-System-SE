@@ -118,11 +118,16 @@
                         aria-label="Estimated remaining effort from {{ project.burndown_chart.start_label }} through {{ project.burndown_chart.current_label }}; sprint ends {{ project.burndown_chart.end_label }}">
                         <line x1="10" y1="10" x2="10" y2="100" class="chart-axis"></line>
                         <line x1="10" y1="100" x2="290" y2="100" class="chart-axis"></line>
+                        <line x1="10" y1="55" x2="290" y2="55" class="chart-gridline"></line>
                         <polyline points="{{ project.burndown_chart.ideal_points }}" class="burndown-ideal"></polyline>
                         <polyline points="{{ project.burndown_chart.actual_points }}" class="burndown-actual"></polyline>
+                        <circle cx="{{ project.burndown_chart.actual_current_x }}"
+                            cy="{{ project.burndown_chart.actual_current_y }}" r="3.5"
+                            class="burndown-current-point"></circle>
                     </svg>
                     <p class="chart-caption">
-                        {{ project.burndown_chart.current_remaining_effort|floatformat:2 }} estimated hours remain.
+                        {{ project.burndown_chart.current_remaining_effort|floatformat:2 }} estimated hours remain
+                        as of {{ project.burndown_chart.current_label }}.
                     </p>
                     <ul class="chart-legend">
                         <li><span class="chart-legend-swatch chart-legend-ideal"></span>Ideal</li>

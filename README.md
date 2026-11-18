@@ -155,6 +155,11 @@ own membership. Deletion requires confirmation and removes the project and its m
 the member accounts. Project changes and membership mutations require authenticated, CSRF-protected
 requests.
 
+Global Administrators can use the **People** page in the workspace navigation to create employee
+accounts and deactivate or reactivate them. Deactivation blocks sign-in while preserving the
+account's task and activity history. Project membership remains project-scoped: Project Managers
+and Administrators add or remove active users from a project's **View project** page.
+
 Project and task creations, updates, status changes, sprint carry-over changes, and deletions are
 retained in the project activity history. Authorized project users can view live project history
 newest first; authorized users retained in the deletion event can also open a deleted project's
@@ -182,20 +187,20 @@ with `TASK_ATTACHMENT_ALLOWED_EXTENSIONS` (default: `pdf,txt,csv,png,jpg,jpeg,gi
 Uploads must be non-empty, within the size limit, and pass a standard-library signature or structure
 check for the selected extension. This content validation is not malware scanning.
 
-**Issue #19 permission coordination:** collaboration currently follows `can_view_tasks_for`: active
-project members, project owners, and admins may view and add comments or attachments, while task
-editing continues to use the narrower `can_edit_task` rule. Confirm this distinction with the
-issue #19 owner before changing collaboration permissions.
+Active project members, project owners, and admins can view and collaborate on project tasks.
+Project members can edit and move tasks in projects they belong to; project managers can also
+manage project planning and workflows. Users outside a project cannot view or change its tasks.
 
 ### Task viewing and status updates
 
 Open **Tasks** in the sidebar or choose **View tasks** from a project. Project members can view
-tasks in projects they can access. Project Admins and Project Managers can update any task
-status; an authorized project member can update a task assigned to them or created by them.
+tasks in projects they can access. Project Admins, Project Managers, and project members can edit
+and move tasks in projects they can access.
 The project task page displays a Kanban board with **Backlog**, **To Do**, **In Progress**,
 **Review**, and **Done** columns. Tasks can move one stage at a time; a task must pass through
 Review before it can be marked Done. Task details also support creation, editing, deletion, and
-project-scoped labels.
+project-scoped labels. Custom workflows must include a **Review** state and may transition into
+their final state only from Review.
 
 Invalid status values are rejected without changing the saved task. Run
 `python backend/manage.py migrate` after pulling changes to apply database migrations.

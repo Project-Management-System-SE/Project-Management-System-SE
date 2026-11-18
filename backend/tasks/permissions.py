@@ -1,4 +1,4 @@
-from projects.permissions import can_manage_project, visible_projects_for
+from projects.permissions import visible_projects_for
 
 
 def can_view_tasks_for(user, project):
@@ -12,11 +12,6 @@ def can_create_task_in(user, project):
 
 
 def can_edit_task(user, task):
-    if not user.is_authenticated:
+    if not user.is_authenticated or not user.is_active:
         return False
-    if can_manage_project(user, task.project):
-        return True
-    is_active_member = task.project.memberships.filter(user=user).exists()
-    if is_active_member and (task.assignee_id == user.pk or task.created_by_id == user.pk):
-        return True
-    return False
+    return can_view_tasks_for(user, task.project)

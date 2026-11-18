@@ -150,7 +150,8 @@ class TaskForm(forms.ModelForm):
                 self.project,
             ) | {current_status}
             invalid_status_message = (
-                "This status change is not allowed by the project workflow."
+                "This status change is not allowed by the project workflow. "
+                "Tasks must pass through Review before they can be completed."
                 if workflow_states
                 else (
                     "This status change is not allowed by the default workflow. "

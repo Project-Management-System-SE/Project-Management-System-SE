@@ -29,7 +29,7 @@
     </div>
 </section>
 
-<form class="card search-filter-form" method="get">
+<form class="card search-filter-form task-filter-form" method="get">
     <input type="hidden" name="view" value="{{ view_mode }}">
     {% for field in filter_form %}
     <div class="form-field">
@@ -50,6 +50,7 @@
 
 {% if view_mode == 'board' %}
 <p class="task-board-feedback" data-task-board-feedback role="status" aria-live="polite" hidden></p>
+<div class="task-board-shell">
 <div class="kanban-board task-board" data-kanban-board data-task-board aria-label="Tasks grouped by status">
     {% for column in board_columns %}
     <section class="kanban-column task-board-column"
@@ -105,44 +106,64 @@
                 {% endif %}
             </article>
             {% empty %}
-            <p class="kanban-column-empty task-board-empty">No tasks in this status.</p>
+            <p class="kanban-column-empty task-board-empty">No tasks here yet</p>
             {% endfor %}
         </div>
     </section>
     {% endfor %}
 </div>
+</div>
 <p class="visually-hidden" data-kanban-announcement aria-live="polite"></p>
 {% else %}
 {% if tasks %}
-<ul class="projects-list">
-    {% for task in tasks %}
-    <li class="card project-list-card">
-        <div class="project-list-heading">
-            <h3><a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a></h3>
-            <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' %}status-warning{% else %}status-neutral{% endif %}">
-                {% if task.workflow_state_id %}{{ task.workflow_state.name }}{% else %}{{ task.get_status_display }}{% endif %}
-            </span>
-        </div>
-        <p>{{ task.description|truncatewords:20|default:"No description provided." }}</p>
-        <div class="task-list-meta">
-            <span><span class="task-meta-label">Priority</span><strong>{{ task.get_priority_display }}</strong></span>
-            <span><span class="task-meta-label">Assignee</span><strong>{% if task.assignee %}{{ task.assignee.full_name|default:task.assignee.email }}{% else %}Unassigned{% endif %}</strong></span>
-            <span><span class="task-meta-label">Due date</span><strong>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}Not set{% endif %}</strong></span>
-            <span><span class="task-meta-label">Estimate</span><strong>{% if task.estimated_effort is not None %}{{ task.estimated_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
-            <span><span class="task-meta-label">Actual</span><strong>{% if task.actual_effort is not None %}{{ task.actual_effort|floatformat:2 }}h{% else %}Not set{% endif %}</strong></span>
-            <span><span class="task-meta-label">Sprint</span><strong>{% if task.sprint %}{{ task.sprint.name }}{% else %}Backlog{% endif %}</strong></span>
-            <span><span class="task-meta-label">Milestone</span><strong>{% if task.milestone %}{{ task.milestone.name }}{% else %}Not set{% endif %}</strong></span>
-        </div>
-        {% if task.labels.all %}
-        <div class="task-labels-list">
-            {% for label in task.labels.all %}
-            <span class="task-label">{{ label.name }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-    </li>
-    {% endfor %}
-</ul>
+<section class="task-table-shell" aria-label="Project task list">
+    <div class="task-table-scroll" tabindex="0" aria-label="Scrollable task table">
+        <table class="task-list-table">
+            <thead>
+                <tr>
+                    <th scope="col">Work</th>
+                    <th scope="col">Assignee</th>
+                    <th scope="col">Reporter</th>
+                    <th scope="col">Priority</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Due date</th>
+                    <th scope="col">Sprint</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for task in tasks %}
+                <tr>
+                    <td class="task-table-work">
+                        <span class="task-table-key">#{{ task.pk }}</span>
+                        <a href="{% url 'tasks:task-detail' project.pk task.pk %}">{{ task.title }}</a>
+                        {% if task.description %}<small>{{ task.description|truncatewords:16 }}</small>{% endif %}
+                    </td>
+                    <td>
+                        {% if task.assignee %}
+                        <span class="task-table-person"><span class="task-person-avatar">{{ task.assignee.full_name|default:task.assignee.email|first|upper }}</span>{{ task.assignee.full_name|default:task.assignee.email }}</span>
+                        {% else %}<span class="task-table-muted">Unassigned</span>{% endif %}
+                    </td>
+                    <td>
+                        <span class="task-table-person"><span class="task-person-avatar task-person-avatar-reporter">{{ task.created_by.full_name|default:task.created_by.email|first|upper }}</span>{{ task.created_by.full_name|default:task.created_by.email }}</span>
+                    </td>
+                    <td><span class="priority-value priority-{{ task.priority|lower }}">{{ task.get_priority_display }}</span></td>
+                    <td>
+                        <span class="task-status-pill{% if task.status == 'DONE' %} task-status-done{% elif task.status == 'IN_PROGRESS' or task.status == 'REVIEW' %} task-status-active{% endif %}">
+                            {% if task.workflow_state_id %}{{ task.workflow_state.name }}{% else %}{{ task.get_status_display }}{% endif %}
+                        </span>
+                    </td>
+                    <td>{% if task.due_date %}{{ task.due_date|date:"M j, Y" }}{% else %}<span class="task-table-muted">—</span>{% endif %}</td>
+                    <td>{% if task.sprint %}{{ task.sprint.name }}{% else %}<span class="task-table-muted">Backlog</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <footer class="task-table-footer">
+        <span>{{ page_obj.paginator.count }} task{{ page_obj.paginator.count|pluralize }}</span>
+        {% if page_obj.has_other_pages %}<span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>{% endif %}
+    </footer>
+</section>
 {% else %}
 <p class="empty-state">No tasks match these filters.</p>
 {% endif %}

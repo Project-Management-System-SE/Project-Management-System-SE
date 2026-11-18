@@ -31,7 +31,7 @@
     {% endfor %}
 
     {% for field in form.visible_fields %}
-    <div class="form-field">
+    <div class="form-field task-form-field task-form-field-{{ field.name }}">
         <label{% if field.id_for_label %} for="{{ field.id_for_label }}"{% endif %}>{{ field.label|default:field.name }}{% if field.field.required %} <span aria-hidden="true">*</span><span class="visually-hidden"> (required)</span>{% endif %}</label>
         {{ field|accessible_widget }}
         {% if field.help_text %}

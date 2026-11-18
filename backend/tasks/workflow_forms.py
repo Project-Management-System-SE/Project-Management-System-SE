@@ -157,6 +157,46 @@ class WorkflowConfigurationForm(forms.Form):
         if not transitions:
             self.add_error("transitions", "Add at least one allowed transition.")
 
+        review_key = states_by_name.get("review")
+        final_key = states_by_name.get(final_name.casefold())
+        if review_key is None:
+            self.add_error(
+                "states",
+                "A workflow must include a Review state before tasks can be completed.",
+            )
+        if review_key and final_key:
+            final_sources = {
+                source for source, target in transitions if target == final_key
+            }
+            if review_key not in final_sources:
+                self.add_error(
+                    "transitions",
+                    "The final state must be reachable from Review.",
+                )
+            if final_sources - {review_key}:
+                self.add_error(
+                    "transitions",
+                    "Tasks may enter the final state only from Review.",
+                )
+
+            if initial_state:
+                initial_key = states_by_name.get(initial_state.casefold())
+                outgoing = {}
+                for source, target in transitions:
+                    outgoing.setdefault(source, set()).add(target)
+                reachable = {initial_key}
+                pending = [initial_key]
+                while pending:
+                    current = pending.pop()
+                    for target in outgoing.get(current, set()) - reachable:
+                        reachable.add(target)
+                        pending.append(target)
+                if review_key not in reachable:
+                    self.add_error(
+                        "transitions",
+                        "The Review state must be reachable from the initial state.",
+                    )
+
         if states and not self.errors:
             state_keys = {state["key"] for state in states}
             used_states = self.project.tasks.values_list(

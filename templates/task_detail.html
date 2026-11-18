@@ -7,7 +7,7 @@
 {% endblock %}
 
 {% block content %}
-<section class="projects-intro" aria-labelledby="task-detail-heading">
+<section class="projects-intro task-detail-intro" aria-labelledby="task-detail-heading">
     <div>
         <h2 id="task-detail-heading">Task details</h2>
         <p>Project: <a href="{% url 'projects:project-detail' project.pk %}">{{ project.name }}</a></p>
@@ -23,7 +23,7 @@
     </div>
 </section>
 
-<article class="card">
+<article class="card task-summary-card">
     <div class="task-detail-meta">
         <span class="status {% if task.status == 'DONE' %}status-success{% elif task.status == 'IN_PROGRESS' or task.status == 'REVIEW' %}status-warning{% else %}status-neutral{% endif %}">
             {{ task.get_status_display }}
@@ -83,7 +83,7 @@
     </div>
 </article>
 
-<section class="task-activity" aria-labelledby="task-activity-heading">
+<section class="task-activity task-page-section" aria-labelledby="task-activity-heading">
     <h2 id="task-activity-heading">Task activity</h2>
     {% if activity %}
     <ol class="task-comments">
@@ -103,7 +103,7 @@
 </section>
 
 {% if can_update_status %}
-<section class="card project-form" aria-labelledby="update-task-status-heading">
+<section class="card project-form task-status-card" aria-labelledby="update-task-status-heading">
     <h2 id="update-task-status-heading">Update status</h2>
     <form method="post" action="{% url 'tasks:task-update-status' project.pk task.pk %}">
         {% csrf_token %}
