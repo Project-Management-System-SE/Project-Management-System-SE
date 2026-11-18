@@ -6,9 +6,9 @@
 <div class="content-header">
     <div>
         <h1 class="page-title">REST API &amp; Integrations Reference</h1>
-        <p class="text-secondary">Comprehensive documentation for external tools (GitHub Actions, Slack, Email) and client integrations.</p>
+        <p class="text-secondary">Comprehensive documentation for external tools (GitHub Actions, Slack, scripts) and client integrations.</p>
     </div>
-    <div>
+    <div style="display: flex; gap: 0.75rem;">
         <a href="{% url 'api:openapi-spec' %}" class="btn btn-secondary" target="_blank">Download OpenAPI JSON</a>
     </div>
 </div>
@@ -20,7 +20,36 @@
     <div class="card-body">
         <p>Pass your authentication token via HTTP Authorization header:</p>
         <pre style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 6px; overflow-x: auto;"><code>Authorization: Bearer &lt;your_api_token&gt;</code></pre>
-        <p style="margin-top: 0.5rem;" class="text-muted">Standard browser session authentication is also supported automatically.</p>
+        <p style="margin-top: 0.5rem;" class="text-muted">Standard browser session authentication is supported for read requests. Unsafe write requests on the API require a Bearer token.</p>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">
+        <h2 style="font-size: 1.15rem; font-weight: 600;">Rate Limiting &amp; Throttling</h2>
+    </div>
+    <div class="card-body">
+        <p>Throttling is applied per authenticated user (or per IP for anonymous callers):</p>
+        <ul style="margin: 0.5rem 0 1rem 1.5rem;">
+            <li><strong>Read requests (GET/HEAD):</strong> 60 requests per 60-second window</li>
+            <li><strong>Write requests (POST/PATCH/PUT/DELETE):</strong> 20 requests per 60-second window</li>
+        </ul>
+        <p>When the limit is exceeded, the server returns <code>429 Too Many Requests</code> with a <code>Retry-After</code> header indicating seconds to wait.</p>
+    </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+    <div class="card-header">
+        <h2 style="font-size: 1.15rem; font-weight: 600;">Pagination &amp; Error Format</h2>
+    </div>
+    <div class="card-body">
+        <p><strong>Pagination:</strong> List endpoints support <code>?page=1&amp;page_size=25</code> (page size up to 100). The response envelope includes <code>count</code>, <code>page</code>, <code>page_size</code>, <code>next_page</code>, and <code>previous_page</code>.</p>
+        <p style="margin-top: 0.75rem;"><strong>Standard Error Format:</strong> All error responses follow a consistent JSON envelope:</p>
+        <pre style="background: #1e293b; color: #f8fafc; padding: 1rem; border-radius: 6px; overflow-x: auto;"><code>{
+  "status": "error",
+  "message": "Validation message or error summary",
+  "errors": { "field_name": ["Specific error description"] }
+}</code></pre>
     </div>
 </div>
 
@@ -33,22 +62,75 @@
             <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
                 <span class="badge badge-success" style="font-weight: 600;">GET</span>
                 <code style="font-size: 1rem;">/api/v1/projects/</code>
-                <span class="text-muted" style="margin-left: auto;">List accessible projects</span>
+                <span class="text-muted" style="margin-left: auto;">List accessible projects (filterable, paginated)</span>
             </li>
             <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
                 <span class="badge badge-success" style="font-weight: 600;">GET</span>
-                <code style="font-size: 1rem;">/api/v1/projects/{id}/tasks/</code>
-                <span class="text-muted" style="margin-left: auto;">List tasks with filters</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/</code>
+                <span class="text-muted" style="margin-left: auto;">Retrieve project details</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/tasks/</code>
+                <span class="text-muted" style="margin-left: auto;">List project tasks (supports status, sprint, priority, date filters)</span>
             </li>
             <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
                 <span class="badge badge-primary" style="font-weight: 600;">POST</span>
-                <code style="font-size: 1rem;">/api/v1/projects/{id}/tasks/</code>
-                <span class="text-muted" style="margin-left: auto;">Create new task (validated)</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/tasks/</code>
+                <span class="text-muted" style="margin-left: auto;">Create task (validated, requires membership)</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-warning" style="font-weight: 600;">PATCH</span>
+                <span class="badge badge-danger" style="font-weight: 600;">DELETE</span>
+                <code style="font-size: 1rem;">/api/v1/tasks/{task_id}/</code>
+                <span class="text-muted" style="margin-left: auto;">Retrieve, update fields, or delete task</span>
             </li>
             <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
                 <span class="badge badge-primary" style="font-weight: 600;">POST</span>
-                <code style="font-size: 1rem;">/api/v1/tasks/{id}/status/</code>
-                <span class="text-muted" style="margin-left: auto;">Update status (workflow enforced)</span>
+                <code style="font-size: 1rem;">/api/v1/tasks/{task_id}/status/</code>
+                <span class="text-muted" style="margin-left: auto;">Update task status (enforces Review before Done)</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/members/</code>
+                <span class="text-muted" style="margin-left: auto;">List and add project members</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-warning" style="font-weight: 600;">PATCH</span>
+                <span class="badge badge-danger" style="font-weight: 600;">DELETE</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/members/{membership_id}/</code>
+                <span class="text-muted" style="margin-left: auto;">Update role or remove member</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-warning" style="font-weight: 600;">PUT</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/workflow/</code>
+                <span class="text-muted" style="margin-left: auto;">Get or configure custom workflow states and transitions</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/sprints/</code>
+                <span class="text-muted" style="margin-left: auto;">List and create project sprints</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/milestones/</code>
+                <span class="text-muted" style="margin-left: auto;">List and create project milestones</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <span class="badge badge-primary" style="font-weight: 600;">POST</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/tasks/{task_id}/comments/</code>
+                <span class="text-muted" style="margin-left: auto;">List and add task comments</span>
+            </li>
+            <li style="padding: 0.75rem; border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; display: flex; align-items: center; gap: 1rem;">
+                <span class="badge badge-success" style="font-weight: 600;">GET</span>
+                <code style="font-size: 1rem;">/api/v1/projects/{project_id}/reports/</code>
+                <span class="text-muted" style="margin-left: auto;">Project progress, velocity, and workload metrics</span>
             </li>
         </ul>
     </div>
