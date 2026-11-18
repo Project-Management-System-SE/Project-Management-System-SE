@@ -12,7 +12,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from projects.models import Project, ProjectMembership, Sprint, Milestone
-from tasks.models import Task, WorkflowState, WorkflowTransition
+from tasks.models import Task, TaskComment, WorkflowState, WorkflowTransition
 from tasks.workflow_forms import WorkflowConfigurationForm
 from projects.permissions import visible_projects_for, can_manage_project
 from tasks.permissions import (
@@ -35,6 +35,65 @@ from .helpers import (
     serialize_task,
     success_response,
 )
+
+
+@csrf_exempt
+@api_auth_required
+@require_http_methods(["GET"])
+def project_report_api(request, project_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    from projects.reports import (
+        get_project_progress_metrics,
+        get_sprint_velocity_metrics,
+        get_team_workload_metrics,
+    )
+
+    progress = get_project_progress_metrics(project)
+    progress = {
+        key: str(value) if isinstance(value, Decimal) else value
+        for key, value in progress.items()
+    }
+    velocity = get_sprint_velocity_metrics(project)
+    serialized_sprints = []
+    for sprint in velocity["sprints"]:
+        serialized_sprints.append({
+            "name": sprint["name"],
+            "status": sprint["status"],
+            "total_tasks": sprint["total_tasks"],
+            "completed_tasks": sprint["completed_tasks"],
+            "estimated_effort": str(sprint["estimated_effort"]),
+            "completed_effort": str(sprint["completed_effort"]),
+            "velocity": str(sprint["velocity"]) if sprint["velocity"] is not None else None,
+            "is_closed": sprint["is_closed"],
+        })
+    velocity_data = {
+        "sprints": serialized_sprints,
+        "closed_sprint_count": velocity["closed_sprint_count"],
+        "complete_velocity_sprint_count": velocity["velocity_sprint_count"],
+        "incomplete_sprint_count": velocity["incomplete_sprint_count"],
+        "total_completed_effort": str(velocity["total_completed_effort"]),
+        "average_velocity": str(velocity["average_velocity"]) if velocity["average_velocity"] is not None else None,
+    }
+    workload_data = [
+        {
+            "name": item["name"],
+            "email": item["email"],
+            "total_tasks": item["total_tasks"],
+            "active_tasks": item["active_tasks"],
+            "completed_tasks": item["completed_tasks"],
+            "estimated_effort": str(item["estimated_effort"]),
+            "actual_effort": str(item["actual_effort"]),
+        }
+        for item in get_team_workload_metrics(project)
+    ]
+    return success_response({
+        "project_id": project.pk,
+        "progress": progress,
+        "velocity": velocity_data,
+        "workload": workload_data,
+    })
 
 
 @csrf_exempt
@@ -248,6 +307,86 @@ def task_status_api(request, task_id):
         message = "; ".join(exc.messages)
         return error_response(message, status=400)
     return success_response(serialize_task(task), message="Task status updated successfully.")
+
+
+def _serialize_comment(comment):
+    return {
+        "id": comment.pk,
+        "task_id": comment.task_id,
+        "author": {
+            "id": comment.author_id,
+            "name": comment.author.full_name or comment.author.username,
+        },
+        "content": comment.content,
+        "created_at": comment.created_at.isoformat(),
+    }
+
+
+@csrf_exempt
+@api_auth_required
+@require_http_methods(["GET", "POST"])
+def task_comment_api(request, project_id, task_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    if not can_view_tasks_for(request.user, project):
+        return error_response("Project not found or access denied.", status=404)
+    task = project.tasks.filter(pk=task_id).first()
+    if task is None:
+        return error_response("Task not found.", status=404)
+
+    if request.method == "GET":
+        comments = task.comments.select_related("author").order_by("created_at", "pk")
+        data = [_serialize_comment(comment) for comment in comments]
+        return success_response({"comments": data, "count": len(data)})
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    content = (body.get("content") or "").strip()
+    if not content:
+        return error_response("content is required.", status=400)
+    comment = TaskComment.objects.create(task=task, author=request.user, content=content)
+    return success_response(
+        _serialize_comment(comment),
+        status=201,
+        message="Comment created successfully.",
+    )
+
+
+@csrf_exempt
+@api_auth_required
+@require_http_methods(["PATCH", "DELETE"])
+def task_comment_detail_api(request, project_id, task_id, comment_id):
+    project = visible_projects_for(request.user).filter(pk=project_id).first()
+    if project is None:
+        return error_response("Project not found or access denied.", status=404)
+    if not can_view_tasks_for(request.user, project):
+        return error_response("Project not found or access denied.", status=404)
+    task = project.tasks.filter(pk=task_id).first()
+    if task is None:
+        return error_response("Task not found.", status=404)
+    comment = task.comments.select_related("author").filter(pk=comment_id).first()
+    if comment is None:
+        return error_response("Comment not found.", status=404)
+
+    can_manage = can_manage_project(request.user, project)
+    if comment.author_id != request.user.pk and not can_manage:
+        return error_response("You do not have permission to modify this comment.", status=403)
+
+    if request.method == "DELETE":
+        comment.delete()
+        return success_response({"deleted_comment_id": comment_id}, message="Comment deleted successfully.")
+
+    body, error = _read_api_json(request)
+    if error:
+        return error
+    content = (body.get("content") or "").strip()
+    if not content:
+        return error_response("content is required.", status=400)
+    comment.content = content
+    comment.save(update_fields=["content"])
+    return success_response(_serialize_comment(comment), message="Comment updated successfully.")
 
 
 def _serialize_membership(membership):

@@ -22,6 +22,13 @@ urlpatterns = [
     path("projects/<int:project_id>/sprints/<int:sprint_id>/", views.sprint_detail_api, name="project-sprint-detail"),
     path("projects/<int:project_id>/milestones/", views.milestone_list_api, name="project-milestones"),
     path("projects/<int:project_id>/milestones/<int:milestone_id>/", views.milestone_detail_api, name="project-milestone-detail"),
+    path("projects/<int:project_id>/tasks/<int:task_id>/comments/", views.task_comment_api, name="task-comments"),
+    path(
+        "projects/<int:project_id>/tasks/<int:task_id>/comments/<int:comment_id>/",
+        views.task_comment_detail_api,
+        name="task-comment-detail",
+    ),
+    path("projects/<int:project_id>/reports/", views.project_report_api, name="project-reports"),
     path("openapi.json", openapi_spec_api, name="openapi-spec"),
     path("docs/", api_docs_viewer, name="api-docs"),
 ]
