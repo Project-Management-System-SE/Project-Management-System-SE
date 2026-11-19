@@ -1,3 +1,5 @@
+import logging
+
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, views as auth_views
@@ -14,6 +16,8 @@ from django.views.decorators.http import require_GET, require_POST
 from .forms import RegistrationForm
 from .models import User
 from .tokens import email_confirmation_token
+
+logger = logging.getLogger(__name__)
 
 
 class EmailLoginForm(AuthenticationForm):
@@ -53,38 +57,49 @@ def register(request):
     if request.method == "POST":
         form = RegistrationForm(request.POST)
         if form.is_valid():
-            with transaction.atomic():
-                user = form.save(commit=False)
-                user.is_active = False
-                user.save()
-                confirmation_path = reverse(
-                    "email-confirm",
-                    kwargs={
-                        "uidb64": urlsafe_base64_encode(force_bytes(user.pk)),
-                        "token": email_confirmation_token.make_token(user),
-                    },
+            try:
+                with transaction.atomic():
+                    user = form.save(commit=False)
+                    user.is_active = False
+                    user.save()
+                    confirmation_path = reverse(
+                        "email-confirm",
+                        kwargs={
+                            "uidb64": urlsafe_base64_encode(force_bytes(user.pk)),
+                            "token": email_confirmation_token.make_token(user),
+                        },
+                    )
+                    sent_count = send_mail(
+                        subject="Confirm your Project Management System email",
+                        message=(
+                            f"Hello {user.full_name},\n\n"
+                            "Confirm your email address to activate your account:\n"
+                            f"{request.build_absolute_uri(confirmation_path)}\n\n"
+                            "This link expires after 24 hours. If you did not create "
+                            "this account, you can ignore this message."
+                        ),
+                        from_email=settings.DEFAULT_FROM_EMAIL,
+                        recipient_list=[user.email],
+                        fail_silently=False,
+                    )
+                    if sent_count != 1:
+                        raise RuntimeError("The registration confirmation email was not sent.")
+            except (OSError, RuntimeError):
+                # SMTP unreachable, refused or misconfigured. The transaction above has
+                # rolled back, so no unconfirmed account is left behind.
+                logger.exception("Registration confirmation email could not be sent.")
+                form.add_error(
+                    None,
+                    "We couldn't send the confirmation email, so your account was not "
+                    "created. Please try again later or ask an administrator to create "
+                    "your account.",
                 )
-                sent_count = send_mail(
-                    subject="Confirm your Project Management System email",
-                    message=(
-                        f"Hello {user.full_name},\n\n"
-                        "Confirm your email address to activate your account:\n"
-                        f"{request.build_absolute_uri(confirmation_path)}\n\n"
-                        "This link expires after 24 hours. If you did not create "
-                        "this account, you can ignore this message."
-                    ),
-                    from_email=settings.DEFAULT_FROM_EMAIL,
-                    recipient_list=[user.email],
-                    fail_silently=False,
+            else:
+                messages.success(
+                    request,
+                    f"Check {user.email} for a link to confirm your email address.",
                 )
-                if sent_count != 1:
-                    raise RuntimeError("The registration confirmation email was not sent.")
-
-            messages.success(
-                request,
-                f"Check {user.email} for a link to confirm your email address.",
-            )
-            return redirect("login")
+                return redirect("login")
     else:
         form = RegistrationForm()
 
