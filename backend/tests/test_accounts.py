@@ -202,19 +202,21 @@ class RegistrationViewTests(TestCase):
         self.assertEqual(len(mail.outbox), 0)
 
     def test_registration_email_failure_does_not_create_an_account(self):
-        with patch("accounts.views.send_mail", return_value=0):
-            with self.assertRaises(RuntimeError):
-                self.client.post(
-                    reverse("register"),
-                    {
-                        "full_name": "New Member",
-                        "email": "new.member@example.com",
-                        "password1": "new-safe-password-123!",
-                        "password2": "new-safe-password-123!",
-                    },
-                )
+        payload = {
+            "full_name": "New Member",
+            "email": "new.member@example.com",
+            "password1": "new-safe-password-123!",
+            "password2": "new-safe-password-123!",
+        }
+        # Mail backend reports nothing sent, and SMTP server unreachable (the live-site case).
+        for failure in ({"return_value": 0}, {"side_effect": ConnectionRefusedError()}):
+            with self.subTest(failure=failure), patch("accounts.views.send_mail", **failure):
+                with self.assertLogs("accounts.views", level="ERROR"):
+                    response = self.client.post(reverse("register"), payload)
 
-        self.assertEqual(User.objects.count(), 0)
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "your account was not")
+                self.assertEqual(User.objects.count(), 0)
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
